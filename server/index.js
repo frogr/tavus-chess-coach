@@ -15,7 +15,11 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, '..', 'public');
 const CONFIG_PATH = path.join(__dirname, '..', '.tavus.json');
 
+let bootPalId = null; // set by auto-setup when there's no .tavus.json (fresh deploys)
+const ACCESS_CODE = process.env.ACCESS_CODE || '';
+
 function tavusConfig() {
+  if (bootPalId && !process.env.TAVUS_PAL_ID) return { pal_id: bootPalId };
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return { ...cfg, pal_id: process.env.TAVUS_PAL_ID || cfg.pal_id };
@@ -67,7 +71,7 @@ function parseMove(fen, text) {
 const routes = {
   'GET /api/config': async () => {
     const cfg = tavusConfig();
-    return { tavusReady: Boolean(process.env.TAVUS_API_KEY && cfg.pal_id) };
+    return { tavusReady: Boolean(process.env.TAVUS_API_KEY && cfg.pal_id), needsCode: Boolean(ACCESS_CODE) };
   },
 
   'GET /api/puzzles': async () => PUZZLES,
@@ -122,7 +126,9 @@ const routes = {
     return judgeMove(fen, move);
   },
 
-  'POST /api/session': async ({ player }) => {
+  'POST /api/session': async ({ player, code }) => {
+    // On a public deploy, every session spends the owner's Tavus minutes.
+    if (ACCESS_CODE && code !== ACCESS_CODE) throw Object.assign(new Error('Wrong access code.'), { status: 401 });
     const cfg = tavusConfig();
     if (!cfg.pal_id) throw Object.assign(new Error('No PAL configured. Run `npm run setup` first.'), { status: 400 });
     const name = String(player || '').trim().slice(0, 40) || null;
@@ -176,9 +182,20 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  const cfg = tavusConfig();
+server.listen(PORT, async () => {
   console.log(`Coach Rook running at http://localhost:${PORT}`);
-  if (!process.env.TAVUS_API_KEY) console.log('  (TAVUS_API_KEY not set: board + engine work, video coach disabled)');
-  else if (!cfg.pal_id) console.log('  (no PAL yet: run `npm run setup`)');
+  if (!process.env.TAVUS_API_KEY) {
+    console.log('  (TAVUS_API_KEY not set: board + engine work, video coach disabled)');
+    return;
+  }
+  if (!tavusConfig().pal_id && process.env.AUTO_SETUP !== '0') {
+    console.log('  No PAL configured, running setup…');
+    try {
+      bootPalId = await require('./setup').ensureSetup();
+      console.log(`  PAL ready: ${bootPalId}`);
+    } catch (e) {
+      console.error(`  Auto-setup failed: ${e.message}`);
+    }
+  }
+  if (ACCESS_CODE) console.log('  Sessions require ACCESS_CODE');
 });

@@ -629,7 +629,7 @@ async function startSession() {
   $('start').disabled = true;
   $('start').textContent = 'Starting…';
   try {
-    const { conversation_id, conversation_url } = await api('/api/session', { player: state.player });
+    const { conversation_id, conversation_url } = await api('/api/session', { player: state.player, code: $('code').value.trim() });
     state.conversationId = conversation_id;
     log('session', 'in', `Conversation ${conversation_id} created`);
     $('videoEmpty').hidden = true;
@@ -743,6 +743,7 @@ async function boot() {
   });
   $('stop').addEventListener('click', endSession);
   const cfg = await api('/api/config');
+  if (cfg.needsCode) $('code').hidden = false;
   if (!cfg.tavusReady) {
     $('start').disabled = true;
     $('setupHint').textContent = 'Video coach not configured on this server (set TAVUS_API_KEY and run npm run setup). The board and engine still work.';

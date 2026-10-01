@@ -1,0 +1,15 @@
+# One-click deploy: https://render.com/deploy?repo=https://github.com/frogr/tavus-chess-coach
+# On first boot the server registers the PAL and tools itself (see server/setup.js).
+services:
+  - type: web
+    name: coach-rook
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: TAVUS_API_KEY
+        sync: false # entered in the Render dashboard, never committed
+      - key: ACCESS_CODE
+        sync: false # visitors need this to start a video session (protects your minutes)

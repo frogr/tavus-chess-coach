@@ -12,6 +12,12 @@ npm run setup               # registers 4 tools + the PAL, writes .tavus.json
 npm start                   # http://localhost:3000
 ```
 
+### Deploy it (free, ~5 minutes)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/frogr/tavus-chess-coach)
+
+Render reads `render.yaml`, asks for `TAVUS_API_KEY` and an `ACCESS_CODE`, and boots the server, which registers the PAL and tools on first start. The access code matters on a public URL: every video session spends the account's Tavus minutes, so the board and engine are open to anyone, but starting the coach needs the code. Free instances sleep when idle, so the first load after a while takes ~30 seconds.
+
 Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes.
 
 ## Why this project
@@ -65,7 +71,8 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **Memory per student.** Entering a name sets a `participant_tags` value, so next session Coach Rook can say "last time the back-rank stuff clicked, let's try something harder."
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general STT mangles.
 - **Key stays on the server.** The browser only ever gets a `conversation_url`.
-- **Setup is code, not clicks.** `npm run setup` is idempotent: tools are matched by name and patched, the PAL is patched in place. A customer can re-run it after every prompt change and diff the config in git.
+- **Setup is code, not clicks.** `npm run setup` is idempotent: tools are matched by name and patched, the PAL is found by ID or name and patched in place. A customer can re-run it after every prompt change and diff the config in git, and a fresh deploy configures itself on boot.
+- **Access code on public deploys.** The API key never leaves the server, but anyone with the URL could still start sessions on your account, so `ACCESS_CODE` gates the video coach.
 - **"Under the hood" panel.** Every tool call, tool result, and board event is shown live. It's for the demo, but it's also the debugging view I'd want when a customer says "the PAL did something weird."
 
 ## How game review works
@@ -95,6 +102,7 @@ server/pal-config.js   system prompt, greeting, tool definitions (all PAL behavi
 server/puzzles.js      6 engine-verified teaching puzzles
 server/review.js       game review: per-move engine pass, mistake scoring, key moments, try-a-move judging
 public/samples/        two sample games for the review mode
-scripts/setup.js       idempotent Tavus setup (tools, PAL, attach)
+server/setup.js        idempotent Tavus setup (tools, PAL, attach); also runs on first boot
+render.yaml            one-click Render deploy
 public/app.js          board, tool handlers, interaction protocol, Daily embed
 ```

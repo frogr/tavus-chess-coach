@@ -1,15 +1,14 @@
-// One-time (and re-runnable) setup: registers the coach's tools and PAL with
-// Tavus, then writes their IDs to .tavus.json for the server to use.
+// Registers the coach's tools and PAL with Tavus and writes their IDs to
+// .tavus.json. Runs from `npm run setup`, and automatically on server boot when
+// no PAL is configured (e.g. a fresh Render deploy).
 //
-//   TAVUS_API_KEY=... npm run setup
-//
-// Re-running is safe: tools are matched by name and updated in place, and the
-// PAL is patched rather than duplicated.
-require('../server/env');
+// Idempotent: tools are matched by name and patched, and the PAL is found by
+// ID or by name and patched, so it never piles up duplicates.
+require('./env');
 const fs = require('fs');
 const path = require('path');
-const { tavus } = require('../server/tavus');
-const { TOOLS, SYSTEM_PROMPT, GREETING } = require('../server/pal-config');
+const { tavus } = require('./tavus');
+const { TOOLS, SYSTEM_PROMPT, GREETING } = require('./pal-config');
 
 const CONFIG_PATH = path.join(__dirname, '..', '.tavus.json');
 const FACE_ID = process.env.TAVUS_FACE_ID || 'rc9cff32ceba'; // stock "Anna" face
@@ -38,7 +37,7 @@ async function upsertTool(tool) {
 
 function palBody() {
   return {
-    pal_name: 'Coach Rook (chess puzzles)',
+    pal_name: PAL_NAME,
     system_prompt: SYSTEM_PROMPT,
     greeting: GREETING,
     pipeline_mode: 'full',
@@ -62,7 +61,19 @@ function palBody() {
   };
 }
 
-async function main() {
+const PAL_NAME = 'Coach Rook (chess puzzles)';
+
+async function findPalByName() {
+  for (let page = 1; page <= 5; page++) {
+    const res = await tavus('GET', `/pals?limit=100&page=${page}&pal_type=user`).catch(() => ({ data: [] }));
+    const hit = (res.data || []).find((p) => p.pal_name === PAL_NAME);
+    if (hit) return hit.pal_id;
+    if (!res.data || res.data.length < 100) return null;
+  }
+  return null;
+}
+
+async function ensureSetup() {
   const config = readConfig();
 
   console.log('Tools:');
@@ -70,7 +81,7 @@ async function main() {
   for (const tool of TOOLS) toolIds.push(await upsertTool(tool));
 
   console.log('PAL:');
-  let palId = config.pal_id;
+  let palId = process.env.TAVUS_PAL_ID || config.pal_id || (await findPalByName());
   if (palId) {
     try {
       const body = palBody();
@@ -94,11 +105,21 @@ async function main() {
   if (missing.length) await tavus('POST', `/pals/${palId}/tools`, { tool_ids: missing });
   console.log(`  ${toolIds.length} tools attached (${missing.length} new)`);
 
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify({ pal_id: palId, face_id: FACE_ID, tool_ids: toolIds }, null, 2));
-  console.log(`\nWrote ${path.relative(process.cwd(), CONFIG_PATH)}. Now run: npm start`);
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify({ pal_id: palId, face_id: FACE_ID, tool_ids: toolIds }, null, 2));
+  } catch {
+    // read-only filesystem: the caller keeps the ID in memory
+  }
+  return palId;
 }
 
-main().catch((e) => {
-  console.error(e.message);
-  process.exit(1);
-});
+module.exports = { ensureSetup };
+
+if (require.main === module) {
+  ensureSetup()
+    .then((id) => console.log(`\nPAL ready: ${id}. Now run: npm start`))
+    .catch((e) => {
+      console.error(e.message);
+      process.exit(1);
+    });
+}

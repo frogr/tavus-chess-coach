@@ -4,7 +4,7 @@
   "description": "A live video chess coach built on Tavus CVI: the PAL watches the board, points at squares, and checks every claim against Stockfish.",
   "main": "server/index.js",
   "scripts": {
-    "setup": "node scripts/setup.js",
+    "setup": "node server/setup.js",
     "start": "node server/index.js",
     "verify-puzzles": "node scripts/verify-puzzles.js"
   },
