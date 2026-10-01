@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { Chess } = require('chess.js');
 const { analyze } = require('./engine');
 const { describeMove, scoreWords, uciLineToSan } = require('./chessText');
+const { httpError } = require('./errors');
 
 // Two passes: a fast scan of every position, then a deep re-check of only the
 // positions around moves the scan flagged. Deep everywhere is ~4x slower on a
@@ -16,7 +17,20 @@ const FLAG_THRESHOLD = 8; // win% lost in the fast pass that earns a deep re-che
 // on a free-tier instance (~8x slower) the caps keep a full review near 20s.
 const FAST_MOVETIME = Number(process.env.REVIEW_FAST_MOVETIME || 250);
 const DEEP_MOVETIME = Number(process.env.REVIEW_DEEP_MOVETIME || 1200);
-const cache = new Map();
+// Reviews are the expensive endpoint and it is open to anyone, so bound it:
+// game length, simultaneous reviews, and the size of the result cache.
+const MAX_PLIES = 400;
+const MAX_ACTIVE = 2;
+const MAX_CACHED = 50;
+const MAX_PGN_BYTES = 100000;
+const cache = new Map(); // key -> Promise of a review, oldest first
+let active = 0;
+
+// PGN headers are free text that ends up in the PAL's context and on screen.
+function cleanHeader(value, fallback) {
+  const text = String(value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return text || fallback;
+}
 
 // Engine line -> centipawns from White's point of view (mates mapped to +-10000).
 function whiteCp(line, fen) {
@@ -56,11 +70,17 @@ async function loadPgn(input) {
   const text = String(input || '').trim();
   const lichess = text.match(/lichess\.org\/([a-zA-Z0-9]{8})/);
   if (lichess) {
-    const res = await fetch(`https://lichess.org/game/export/${lichess[1]}?clocks=false&evals=false`, {
-      headers: { Accept: 'application/x-chess-pgn' },
-    });
-    if (!res.ok) throw Object.assign(new Error(`Lichess returned ${res.status} for that game`), { status: 400 });
-    return res.text();
+    let res;
+    try {
+      res = await fetch(`https://lichess.org/game/export/${lichess[1]}?clocks=false&evals=false`, {
+        headers: { Accept: 'application/x-chess-pgn' },
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      throw httpError(502, "Couldn't reach Lichess to download that game. Paste the PGN instead.");
+    }
+    if (!res.ok) throw httpError(400, `Lichess returned ${res.status} for that game`);
+    return (await res.text()).slice(0, MAX_PGN_BYTES).trim();
   }
   return text;
 }
@@ -70,23 +90,38 @@ async function evalPosition(fen, depth, movetime, newGame = false) {
   if (c.isCheckmate()) return { cp: c.turn() === 'w' ? -10000 : 10000, best: null, pv: [] };
   if (c.isGameOver()) return { cp: 0, best: null, pv: [] };
   const r = await analyze(fen, depth, { multipv: 1, movetime, newGame });
+  if (!r.lines[0]) return { cp: 0, best: null, pv: [] };
   return { cp: whiteCp(r.lines[0], fen), best: r.bestmove, pv: r.lines[0].pv };
 }
 
 async function reviewGame(input, side) {
   const pgn = await loadPgn(input);
+  if (!pgn) throw httpError(400, 'Paste a PGN or a Lichess game link first.');
   const key = crypto.createHash('sha1').update(pgn + '|' + side).digest('hex');
+  // The cache holds promises, so two people loading the same game share one engine pass.
   if (cache.has(key)) return cache.get(key);
 
   const game = new Chess();
   try {
     game.loadPgn(pgn);
   } catch (e) {
-    throw Object.assign(new Error(`Couldn't read that PGN: ${e.message}`), { status: 400 });
+    throw httpError(400, `Couldn't read that PGN: ${String(e.message).slice(0, 200)}`);
   }
-  const headers = game.header();
   const history = game.history({ verbose: true });
-  if (!history.length) throw Object.assign(new Error('That game has no moves.'), { status: 400 });
+  if (!history.length) throw httpError(400, 'That game has no moves.');
+  if (history.length > MAX_PLIES) throw httpError(400, `That game is too long to review (limit: ${MAX_PLIES / 2} moves).`);
+  if (active >= MAX_ACTIVE) throw httpError(503, 'The server is reviewing other games right now. Try again in a minute.');
+
+  active++;
+  const job = runReview(game, history, side).finally(() => active--);
+  cache.set(key, job);
+  if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value);
+  job.catch(() => cache.delete(key));
+  return job;
+}
+
+async function runReview(game, history, side) {
+  const headers = game.header();
 
   // Positions: before move 1 through after the last move.
   const fens = [history[0].before, ...history.map((m) => m.after)];
@@ -139,18 +174,17 @@ async function reviewGame(input, side) {
 
   const result = {
     headers: {
-      White: headers.White || 'White',
-      Black: headers.Black || 'Black',
-      Result: headers.Result || '*',
-      Event: headers.Event || '',
-      Date: headers.Date || '',
+      White: cleanHeader(headers.White, 'White'),
+      Black: cleanHeader(headers.Black, 'Black'),
+      Result: cleanHeader(headers.Result, '*'),
+      Event: cleanHeader(headers.Event, ''),
+      Date: cleanHeader(headers.Date, ''),
     },
     side: side || null,
     startFen: fens[0],
     moves,
     keyMoments,
   };
-  cache.set(key, result);
   return result;
 }
 
@@ -181,7 +215,7 @@ function reviewContext(review, studentName) {
     (review.keyMoments.length
       ? `Engine-found key moments (call chess_goto_moment to show one): ${review.keyMoments.map((k) => k.text).join(' ')}`
       : 'The engine found no real mistakes by the student in this game.');
-  if (Buffer.byteLength(text) > 3500) text = text.slice(0, 3400) + '…';
+  while (Buffer.byteLength(text) > 3500) text = text.slice(0, Math.floor(text.length * 0.95)) + '…';
   return text;
 }
 
@@ -190,7 +224,12 @@ function reviewContext(review, studentName) {
 async function judgeMove(fen, uci) {
   const c = new Chess(fen);
   const mover = c.turn();
-  const move = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
+  let move;
+  try {
+    move = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
+  } catch {
+    throw httpError(400, 'That move is not legal in this position.');
+  }
   const sign = mover === 'w' ? 1 : -1;
   const before = await analyze(fen, 14, { multipv: 1, movetime: 1000 });
   const bestCp = whiteCp(before.lines[0], fen);
@@ -213,4 +252,4 @@ async function judgeMove(fen, uci) {
   };
 }
 
-module.exports = { judgeMove, reviewGame, reviewContext, winPct, whiteCp, moveLabel };
+module.exports = { judgeMove, reviewGame, reviewContext, winPct, whiteCp, classify, moveLabel, MAX_PLIES };

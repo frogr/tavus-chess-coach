@@ -2,11 +2,13 @@
 // The board is the source of truth. The PAL is told about every board event
 // over the Tavus interaction protocol, and it acts on the board through tool
 // calls (app-message delivery) that this file handles.
-import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
+// chess.js and the Daily SDK are served by our own server from the installed
+// npm packages (see VENDOR in server/index.js), so nothing loads from a CDN.
+import { Chess } from '/vendor/chess.js';
+import { pickPuzzle } from '/puzzle-logic.mjs';
 
 const $ = (id) => document.getElementById(id);
-const PIECE_URL = (color, type) =>
-  `https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/${color}${type.toUpperCase()}.svg`;
+const PIECE_URL = (color, type) => `/pieces/${color}${type.toUpperCase()}.svg`;
 const FILES = 'abcdefgh';
 const SIM = new URLSearchParams(location.search).has('sim');
 
@@ -47,6 +49,16 @@ function puzzleLog() {
 
 const puzzle = () => state.puzzles[state.index];
 
+// Every time the board is pointed at a new position (puzzle, review ply, key
+// moment) the generation changes. Animations and delayed take-backs remember
+// the generation they started in and stop if it has moved on, so switching
+// puzzles mid-animation can never play stale moves or leave the board locked.
+let generation = 0;
+function newPosition() {
+  state.busy = false;
+  return ++generation;
+}
+
 // ---------------------------------------------------------------- API helpers
 async function api(path, body) {
   const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
@@ -73,6 +85,7 @@ function log(kind, cls, text, detail) {
 // ---------------------------------------------------------------- board render
 function render() {
   const board = $('board');
+  const focused = board.contains(document.activeElement) ? document.activeElement.dataset.square : null;
   board.innerHTML = '';
   const legalTargets = state.selected
     ? state.chess.moves({ square: state.selected, verbose: true }).map((m) => m.to)
@@ -88,6 +101,8 @@ function render() {
       const el = document.createElement('div');
       el.className = `sq ${(r + f) % 2 === 0 ? 'l' : 'd'}`;
       el.dataset.square = square;
+      el.tabIndex = 0;
+      el.setAttribute('role', 'button');
       if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) el.classList.add('last');
       if (state.selected === square) el.classList.add('sel');
       if (state.highlights.includes(square)) el.classList.add('hl');
@@ -97,15 +112,22 @@ function render() {
         const pc = document.createElement('div');
         pc.className = 'piece';
         pc.style.backgroundImage = `url(${PIECE_URL(p.color, p.type)})`;
-        pc.title = `${p.color === 'w' ? 'White' : 'Black'} ${p.type}`;
+        pc.title = `${sideName(p.color)} ${NAMES[p.type]}`;
         el.appendChild(pc);
       }
+      el.setAttribute('aria-label', p ? `${square}, ${sideName(p.color)} ${NAMES[p.type]}` : `${square}, empty`);
       if (vf === 0) el.insertAdjacentHTML('beforeend', `<span class="coord r">${8 - r}</span>`);
       if (vr === 7) el.insertAdjacentHTML('beforeend', `<span class="coord f">${FILES[f]}</span>`);
       el.addEventListener('click', () => onSquare(square));
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onSquare(square);
+      });
       board.appendChild(el);
     }
   }
+  if (focused) board.querySelector(`[data-square="${focused}"]`)?.focus();
   renderArrows();
   $('moves').textContent = state.mode === 'puzzle' ? state.sanLog.join(' ') : '';
 }
@@ -153,6 +175,7 @@ function sideName(color) {
 async function loadPuzzle(index, { announce = true } = {}) {
   state.index = (index + state.puzzles.length) % state.puzzles.length;
   setMode('puzzle');
+  newPosition();
   const p = puzzle();
   state.chess = new Chess(p.fen);
   state.ply = 0;
@@ -223,7 +246,9 @@ async function playerMove(from, to) {
     // Take the move back on a fixed timer, independent of the engine call, so
     // a slow server never leaves the board locked.
     state.busy = true;
+    const gen = generation;
     setTimeout(() => {
+      if (gen !== generation) return;
       state.chess.undo();
       state.lastMove = null;
       state.busy = false;
@@ -261,7 +286,9 @@ async function playerMove(from, to) {
   // Correct but not finished: play the opponent's reply from the solution line.
   setStatus('Good move…', 'good');
   state.busy = true;
+  const gen = generation;
   await sleep(650);
+  if (gen !== generation) return;
   const replyUci = p.line[state.ply];
   const reply = state.chess.move({ from: replyUci.slice(0, 2), to: replyUci.slice(2, 4), promotion: replyUci[4] || 'q' });
   state.ply += 1;
@@ -291,7 +318,9 @@ async function playSolution() {
   const p = puzzle();
   const pl = puzzleLog();
   if (pl && !pl.solved) pl.gaveUp = true;
+  const gen = newPosition();
   state.busy = true;
+  state.selected = null;
   state.chess = new Chess(p.fen);
   state.sanLog = [];
   state.highlights = [];
@@ -299,6 +328,7 @@ async function playSolution() {
   render();
   for (const uci of p.line) {
     await sleep(800);
+    if (gen !== generation) return 'The student moved on to something else before the solution finished playing.';
     const m = state.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
     state.sanLog.push(m.san);
     state.lastMove = m;
@@ -406,6 +436,7 @@ function gotoPly(ply) {
   const r = state.review;
   if (!r) return;
   ply = Math.max(0, Math.min(r.moves.length, ply));
+  newPosition();
   state.reviewPly = ply;
   state.moment = null;
   state.trying = false;
@@ -432,10 +463,12 @@ function gotoPly(ply) {
 // Put the board just BEFORE the key move and let the student look for better.
 function gotoMoment(n) {
   const r = state.review;
+  if (!r) return 'No game is loaded for review.';
   const k = r.keyMoments[Math.max(0, Math.min(r.keyMoments.length - 1, n - 1))];
   if (!k) return 'This game has no key moments for the student.';
   const m = r.moves[k.ply - 1];
   const prev = r.moves[k.ply - 2];
+  newPosition();
   state.reviewPly = k.ply - 1;
   state.moment = k.index;
   state.trying = true;
@@ -459,45 +492,56 @@ async function reviewTry(from, to) {
   const move = state.chess.move({ from, to, promotion: 'q' });
   state.lastMove = move;
   state.busy = true;
+  const gen = generation;
   render();
   setStatus('Checking with the engine…', '');
   const who = state.player || 'The student';
-  try {
-    const j = await api('/api/judge', { fen, move: move.lan });
-    state.sessionLog?.review?.tries.push({ moment: state.moment, move: j.san, ok: j.ok });
-    if (j.ok) {
-      state.trying = false;
-      setStatus(`${j.san} works! ✓`, 'good');
-      sendRespond(
-        `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). The engine approves: evaluation after it is ${j.evalAfter}` +
-          `${j.san === j.bestSan ? ", and it is the engine's top choice" : `, about as good as the engine's top choice ${j.bestSan}`}. ` +
-          `Praise what they found, explain the idea in a sentence, and offer the next key moment.`
-      );
-    } else {
-      setStatus(`${j.san} isn't better. Try again.`, 'bad');
-      setTimeout(() => {
-        state.chess.undo();
-        state.lastMove = null;
-        render();
-      }, 900);
-      sendRespond(
-        `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). Not good enough: evaluation after it is ${j.evalAfter}, ` +
-          `while the best move keeps ${j.evalBest}. The board took it back. Engine's best (secret unless they give up): ${j.bestSan}, line ${j.bestLine.join(' ')}. ` +
-          `Say briefly what their try allows and nudge them toward the idea.`
-      );
-    }
-  } catch (e) {
+  const takeBack = () => {
+    if (gen !== generation) return;
     state.chess.undo();
-    setStatus(e.message, 'bad');
-  } finally {
+    state.lastMove = null;
     state.busy = false;
     render();
+  };
+  let j;
+  try {
+    j = await api('/api/judge', { fen, move: move.lan });
+  } catch (e) {
+    if (gen !== generation) return;
+    takeBack();
+    setStatus(e.message, 'bad');
+    return;
+  }
+  if (gen !== generation) return; // the student navigated away while the engine was thinking
+  state.sessionLog?.review?.tries.push({ moment: state.moment, move: j.san, ok: j.ok });
+  if (j.ok) {
+    state.trying = false;
+    state.busy = false;
+    setStatus(`${j.san} works! ✓`, 'good');
+    render();
+    sendRespond(
+      `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). The engine approves: evaluation after it is ${j.evalAfter}` +
+        `${j.san === j.bestSan ? ", and it is the engine's top choice" : `, about as good as the engine's top choice ${j.bestSan}`}. ` +
+        `Praise what they found, explain the idea in a sentence, and offer the next key moment.`
+    );
+  } else {
+    setStatus(`${j.san} isn't better. Try again.`, 'bad');
+    setTimeout(takeBack, 900); // the board stays locked until the move is taken back
+    sendRespond(
+      `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). Not good enough: evaluation after it is ${j.evalAfter}, ` +
+        `while the best move keeps ${j.evalBest}. The board took it back. Engine's best (secret unless they give up): ${j.bestSan}, line ${j.bestLine.join(' ')}. ` +
+        `Say briefly what their try allows and nudge them toward the idea.`
+    );
   }
 }
 
+// Plays a line from `fen` on the board. Returns the moves that were shown, and
+// leaves the board locked: the caller decides what position to return to.
 async function animateLine(fen, sans) {
+  const gen = newPosition();
   state.busy = true;
   state.trying = false;
+  state.selected = null;
   state.highlights = [];
   state.arrows = [];
   state.chess = new Chess(fen);
@@ -505,6 +549,7 @@ async function animateLine(fen, sans) {
   const played = [];
   for (const san of sans) {
     await sleep(850);
+    if (gen !== generation) break;
     try {
       const m = state.chess.move(san);
       played.push(m.san);
@@ -514,25 +559,50 @@ async function animateLine(fen, sans) {
       break;
     }
   }
-  state.busy = false;
   return played;
 }
 
 async function showEngineLine() {
   const r = state.review;
+  if (!r) return 'No game is loaded for review. The student can paste one in the "Review a game" tab.';
   const k = state.moment ? r.keyMoments[state.moment - 1] : null;
   const m = k ? r.moves[k.ply - 1] : r.moves[state.reviewPly];
   if (!m || !m.bestLine.length) return 'There is no engine line to show here.';
   const line = m.bestLine.slice(0, 5);
+  const ply = state.reviewPly;
   setStatus(`Engine line: ${line.join(' ')}`, '');
   const played = await animateLine(m.fenBefore, line);
-  // Leave the line on the board for a beat, then return to the moment.
+  // Leave the line on the board for a beat, then return to where we were.
+  const gen = generation;
   setTimeout(() => {
-    if (state.mode !== 'review') return;
+    if (gen !== generation) return;
     if (k) gotoMoment(k.index);
-    else gotoPly(state.reviewPly);
+    else gotoPly(ply);
   }, 4000);
   return `The board animated the engine's line instead of ${m.san}: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
+}
+
+// Puzzle mode: show the engine's line from the position on the board, then put
+// the position back exactly as it was.
+async function showPuzzleEngineLine() {
+  const a = await api('/api/analyze', { fen: state.chess.fen() });
+  const line = a.best ? a.best.san.slice(0, 4) : [];
+  if (!line.length) return 'There is no engine line to show here: the position on the board is already finished.';
+  const pl = puzzleLog();
+  if (pl && !pl.solved) pl.gaveUp = true; // the engine's line from here is the answer
+  const before = { chess: state.chess, lastMove: state.lastMove };
+  setStatus(`Engine line: ${line.join(' ')}`, '');
+  const played = await animateLine(before.chess.fen(), line);
+  const gen = generation;
+  setTimeout(() => {
+    if (gen !== generation) return;
+    state.chess = before.chess;
+    state.lastMove = before.lastMove;
+    state.busy = false;
+    setStatus(state.solved ? 'Solved! ✓' : `${sideName(state.chess.turn())} to move`, state.solved ? 'good' : '');
+    render();
+  }, 4000);
+  return `The board animated the engine's line from the current position: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
 }
 
 // ---------------------------------------------------------------- tool calls
@@ -563,23 +633,10 @@ const TOOL_HANDLERS = {
   },
 
   async chess_load_puzzle(args) {
-    const which = args.which || 'next';
-    let target = state.index;
-    if (which === 'next') target = state.index + 1;
-    if (which === 'theme' && args.theme) {
-      const want = String(args.theme).toLowerCase();
-      const words = want.split(/[^a-z]+/).filter((w) => w.length > 3);
-      const i = state.puzzles.findIndex((p) => p.theme.includes(want) || words.some((w) => p.theme.includes(w)));
-      if (i >= 0) target = i;
-      else return `No puzzle with the theme "${args.theme}". Available: ${state.puzzles.map((p) => p.theme).join(', ')}.`;
-    }
-    if (which === 'harder' || which === 'easier') {
-      const level = puzzle().level + (which === 'harder' ? 1 : -1);
-      const candidates = state.puzzles.map((p, i) => ({ p, i })).filter(({ p, i }) => p.level === level && i !== state.index);
-      target = candidates.length ? candidates[0].i : state.index + (which === 'harder' ? 1 : -1);
-    }
-    const context = await loadPuzzle(target, { announce: false });
-    return context + ' Introduce the puzzle in one sentence and ask the student what they notice.';
+    const pick = pickPuzzle(state.puzzles, state.index, args.which || 'next', args.theme);
+    if (pick.error) return pick.error;
+    const context = await loadPuzzle(pick.index, { announce: false });
+    return `${pick.note ? pick.note + ' ' : ''}${context} Introduce the puzzle in one sentence and ask the student what they notice.`;
   },
 
   async chess_play_solution() {
@@ -594,8 +651,7 @@ const TOOL_HANDLERS = {
 
   async chess_show_engine_line() {
     if (state.mode === 'review') return showEngineLine();
-    const a = await api('/api/analyze', { fen: state.chess.fen() });
-    return animateLine(state.chess.fen(), a.best ? a.best.san.slice(0, 4) : []);
+    return showPuzzleEngineLine();
   },
 };
 
@@ -667,8 +723,11 @@ async function startSession() {
   try { localStorage.setItem('coach-rook-player', state.player); } catch {}
   $('start').disabled = true;
   $('start').textContent = 'Starting…';
+  let created = null; // conversation to end again if the video never connects
   try {
+    if (!window.Daily) throw new Error('the video library did not load. Reload the page and try again.');
     const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, code: $('code').value.trim() });
+    created = conversation_id;
     state.conversationId = conversation_id;
     state.sessionLog = newSessionLog();
     log('session', 'in', `Conversation ${conversation_id} created${returning ? ' (returning student: last session notes sent to the coach)' : ''}`);
@@ -701,12 +760,26 @@ async function startSession() {
       state.call = null;
     }
     state.conversationId = null;
+    state.sessionLog = null;
+    // Don't leave a conversation running (and billing) that nobody joined.
+    if (created) api('/api/session/end', { conversation_id: created, code: $('code').value.trim() }).catch(() => {});
     $('videoEmpty').hidden = false;
   } finally {
     $('start').disabled = false;
     $('start').textContent = 'Start coaching session';
   }
 }
+
+function sessionSummary() {
+  return state.sessionLog ? { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review } : null;
+}
+
+// Closing the tab mid-session: still end the conversation and save the note.
+window.addEventListener('pagehide', () => {
+  if (!state.conversationId || !navigator.sendBeacon) return;
+  const body = { conversation_id: state.conversationId, player: state.player, code: $('code').value.trim(), summary: sessionSummary() };
+  navigator.sendBeacon('/api/session/end', new Blob([JSON.stringify(body)], { type: 'application/json' }));
+});
 
 async function endSession() {
   const id = state.conversationId;
@@ -722,9 +795,7 @@ async function endSession() {
   $('stop').hidden = true;
   if (id) {
     log('session', 'in', `Conversation ${id} ended`);
-    const summary = state.sessionLog
-      ? { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review }
-      : null;
+    const summary = sessionSummary();
     state.sessionLog = null;
     try {
       const r = await api('/api/session/end', { conversation_id: id, player: state.player, code: $('code').value.trim(), summary });
@@ -811,6 +882,7 @@ function setupSim() {
 
 // ---------------------------------------------------------------- boot
 async function boot() {
+  $('board').setAttribute('role', 'group');
   try { $('player').value = localStorage.getItem('coach-rook-player') || ''; } catch {}
   state.puzzles = await api('/api/puzzles');
   await loadPuzzle(0, { announce: false });
@@ -871,4 +943,7 @@ async function boot() {
   if (SIM) setupSim();
 }
 
-boot();
+boot().catch((e) => {
+  $('pTitle').textContent = "Couldn't load Coach Rook";
+  setStatus(`${e.message}. Reload the page to try again.`, 'bad');
+});

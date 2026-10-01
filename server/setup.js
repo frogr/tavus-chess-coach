@@ -10,7 +10,7 @@ const path = require('path');
 const { tavus } = require('./tavus');
 const { TOOLS, SYSTEM_PROMPT, GREETING } = require('./pal-config');
 
-const CONFIG_PATH = path.join(__dirname, '..', '.tavus.json');
+const CONFIG_PATH = process.env.TAVUS_CONFIG_PATH || path.join(__dirname, '..', '.tavus.json');
 const FACE_ID = process.env.TAVUS_FACE_ID || 'rc9cff32ceba'; // stock "Anna" face
 
 function readConfig() {
@@ -64,15 +64,19 @@ function palBody() {
 const PAL_NAME = 'Coach Rook (chess puzzles)';
 const nameKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+// A failed lookup throws rather than reporting "not found": treating an API
+// hiccup as "no PAL yet" is how duplicates get created.
 async function findPalByName() {
+  const hits = [];
   for (let page = 1; page <= 5; page++) {
-    const res = await tavus('GET', `/pals?limit=100&page=${page}&pal_type=user`).catch(() => ({ data: [] }));
+    const res = await tavus('GET', `/pals?limit=100&page=${page}&pal_type=user`);
     // Tavus strips punctuation from stored names, so compare letters and digits only.
-    const hit = (res.data || []).find((p) => nameKey(p.pal_name) === nameKey(PAL_NAME));
-    if (hit) return hit.pal_id;
-    if (!res.data || res.data.length < 100) return null;
+    hits.push(...(res.data || []).filter((p) => nameKey(p.pal_name) === nameKey(PAL_NAME)));
+    if (!res.data || res.data.length < 100) break;
   }
-  return null;
+  // If there are several, always settle on the oldest so student memory (stored per PAL) stays put.
+  hits.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  return hits.length ? hits[0].pal_id : null;
 }
 
 async function ensureSetup() {
@@ -91,7 +95,9 @@ async function ensureSetup() {
       await tavus('PATCH', `/pals/${palId}`, ops);
       console.log(`  updated PAL ${palId}`);
     } catch (e) {
-      console.log(`  could not patch ${palId} (${e.status}); creating a new one`);
+      // Only a PAL that no longer exists is replaced; any other failure is surfaced.
+      if (e.status !== 404) throw e;
+      console.log(`  PAL ${palId} no longer exists; creating a new one`);
       palId = null;
     }
   }

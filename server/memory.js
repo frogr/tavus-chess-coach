@@ -8,14 +8,55 @@
 //    needed hints, wrong tries, review mistakes). Pinned facts are available
 //    to the PAL from the very next conversation, with no processing delay, and
 //    they're ground truth rather than the model's impression of the call.
+const crypto = require('crypto');
 const { tavus } = require('./tavus');
+const PUZZLES = require('./puzzles');
 
 const MAX_PINNED = 30; // Tavus limit per store
 const NOTE_PREFIX = 'Session note';
 
+// Names are typed by the student and end up in the PAL's context.
+function cleanName(name) {
+  return String(name ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+}
+
 function participantTag(name) {
-  const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return slug ? `chess-student-${slug}` : null;
+  const clean = cleanName(name).toLowerCase();
+  if (!clean) return null;
+  const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  // Names with no ASCII letters (e.g. "张伟") still get a stable tag.
+  return `chess-student-${slug || crypto.createHash('sha1').update(clean).digest('hex').slice(0, 12)}`;
+}
+
+// The session summary comes from the browser and is written into long-lived
+// memory that the PAL reads, so keep only what the board can actually produce:
+// known puzzle themes, moves in chess notation, short plain-text labels.
+const THEMES = new Set(PUZZLES.map((p) => p.theme));
+const SAN = /^(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?)[+#]?$/;
+const label = (v, max) => String(v ?? '').replace(/[^\p{L}\p{N} .,;:?!'()+#=\/-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
+function sanitizeSummary(summary) {
+  const src = summary && typeof summary === 'object' ? summary : {};
+  const puzzles = (Array.isArray(src.puzzles) ? src.puzzles : [])
+    .filter((p) => p && typeof p === 'object' && THEMES.has(p.theme))
+    .slice(0, PUZZLES.length)
+    .map((p) => ({
+      theme: p.theme,
+      wrong: (Array.isArray(p.wrong) ? p.wrong : []).filter((m) => typeof m === 'string' && SAN.test(m)).slice(0, 10),
+      hints: Math.max(0, Math.min(50, Math.floor(Number(p.hints) || 0))),
+      solved: p.solved === true,
+      gaveUp: p.gaveUp === true,
+    }));
+  let review = null;
+  const r = src.review;
+  if (r && typeof r === 'object' && label(r.game, 80)) {
+    review = {
+      game: label(r.game, 80),
+      mistakes: (Array.isArray(r.mistakes) ? r.mistakes : []).map((m) => label(m, 80)).filter(Boolean).slice(0, 4),
+      tries: (Array.isArray(r.tries) ? r.tries : []).slice(0, 40).map((t) => ({ ok: Boolean(t && t.ok === true) })),
+    };
+  }
+  return { puzzles, review };
 }
 
 async function findStore(palId, tag) {
@@ -79,7 +120,7 @@ function sessionNote(summary, date = new Date()) {
 async function recordSession(palId, name, summary) {
   const tag = participantTag(name);
   if (!tag) return { saved: false, reason: 'no name' };
-  const note = sessionNote(summary);
+  const note = sessionNote(sanitizeSummary(summary));
   if (!note) return { saved: false, reason: 'nothing happened on the board' };
   const id = await ensureStore(palId, tag);
   // Stay under the pinned limit: drop the oldest session notes first.
@@ -95,4 +136,4 @@ async function recordSession(palId, name, summary) {
   return { saved: true, note };
 }
 
-module.exports = { participantTag, getMemory, recordSession, sessionNote };
+module.exports = { cleanName, participantTag, getMemory, recordSession, sessionNote, sanitizeSummary };

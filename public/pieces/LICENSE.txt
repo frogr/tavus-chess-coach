@@ -1,0 +1,6 @@
+Chess piece images ("cburnett" set) by Colin M.L. Burnett.
+https://en.wikipedia.org/wiki/User:Cburnett/GFDL_images/Chess
+
+Copied from lichess-org/lila (public/piece/cburnett). These files are licensed
+separately from the rest of this repository: GPLv2 or later (the author also
+offers them under the BSD license and the GFDL).

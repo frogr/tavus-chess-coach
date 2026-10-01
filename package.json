@@ -6,11 +6,15 @@
   "scripts": {
     "setup": "node server/setup.js",
     "start": "node server/index.js",
+    "test": "node --test test/*.test.js",
     "verify-puzzles": "node scripts/verify-puzzles.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=20"
+  },
   "license": "MIT",
   "dependencies": {
+    "@daily-co/daily-js": "0.92.2",
     "chess.js": "^1.4.0",
     "stockfish": "^10.0.2"
   }

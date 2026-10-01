@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
   <link rel="stylesheet" href="/styles.css" />
-  <script crossorigin src="https://unpkg.com/@daily-co/daily-js"></script>
+  <script src="/vendor/daily.js"></script>
 </head>
 <body data-mode="puzzle">
   <header class="topbar">
@@ -43,10 +43,10 @@
           <div class="eyebrow" id="pLevel">Puzzle</div>
           <h1 id="pTitle">Loading…</h1>
         </div>
-        <div class="status" id="status"></div>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
       </div>
       <div class="board-wrap">
-        <div id="board" class="board" aria-label="Chess board"></div>
+        <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to."></div>
         <svg id="arrows" class="arrows" viewBox="0 0 8 8" preserveAspectRatio="none">
           <defs>
             <marker id="head" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto">
