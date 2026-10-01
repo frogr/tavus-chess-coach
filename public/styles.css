@@ -129,3 +129,10 @@ body[data-mode="review"] .puzzle-only { display: none; }
 .mv.blunder { color: var(--bad); }
 .mv.key { border-color: var(--line); }
 .mv.cur { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+
+/* coach's notebook */
+.notebook { border: 1px solid var(--accent); border-radius: 12px; padding: 12px; margin-bottom: 16px; background: rgba(95, 211, 141, 0.06); }
+.notebook h2 { color: var(--accent); }
+.notebook ul { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.notebook li { font-size: 12.5px; line-height: 1.45; padding-left: 10px; border-left: 2px solid var(--accent); }
+.notebook li.learned { border-left-color: #9ab8ff; color: var(--muted); }

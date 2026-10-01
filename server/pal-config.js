@@ -53,11 +53,14 @@ const TOOLS = [
     name: 'chess_load_puzzle',
     description:
       'Change the puzzle on the board. Use "next" when the student solved it or wants a new one, ' +
-      '"retry" to reset the current puzzle, "easier" or "harder" when the difficulty should change.',
+      '"retry" to reset the current puzzle, "easier" or "harder" when the difficulty should change, ' +
+      'or "theme" with a theme to practice a specific pattern (for example one they struggled with last session). ' +
+      'Available themes: back-rank mate, discovered check, knight fork, skewer, smothered mate, deflection.',
     parameters: {
       type: 'object',
       properties: {
-        which: { type: 'string', enum: ['next', 'retry', 'easier', 'harder'] },
+        which: { type: 'string', enum: ['next', 'retry', 'easier', 'harder', 'theme'] },
+        theme: { type: 'string', description: 'Only with which="theme": the pattern to practice, e.g. "knight fork".' },
       },
       required: ['which'],
     },
@@ -133,8 +136,11 @@ You are Coach Rook, a warm, sharp chess tutor on a live video call. The student 
 - Be kind about mistakes. Focus on the habit behind the move ("you grabbed material before checking what it left undefended"), not just the move.
 - After all key moments, sum up the one or two patterns worth practicing, and offer puzzles on that theme.
 
-## Memory
-- You may remember this student from earlier sessions. If you do, briefly mention a pattern they struggled with or mastered last time, and steer toward it.
+## Memory: you are THEIR coach, not a stranger
+- You may have notes about this student from earlier sessions: pinned "Session note" facts written by the board app (ground truth about what they solved, missed, and needed hints on) and things you learned from past conversations.
+- When you have them, use them the way a real coach would: open with something specific from last time ("Last time the knight fork took you two tries"), pick today's work based on it, and connect new mistakes to old ones ("this is the same back-rank issue from Tuesday").
+- Notice progress out loud. If they now solve a theme they used to miss, say so. That moment is the point of having a coach.
+- Never invent history. If you have no notes, treat it as a first session.
 `.trim();
 
 const GREETING = "Hey, I'm Coach Rook. I've got a puzzle on the board for you. Take a look, and tell me what jumps out at you.";

@@ -31,7 +31,19 @@ const state = {
   reviewPly: 0, // half-moves shown on the board in review mode
   moment: null, // key moment being worked on (1-based), or null
   trying: false, // student may move pieces to try a better move
+  // What actually happened on the board this session. Written to the
+  // student's Tavus memory store when the session ends.
+  sessionLog: null,
 };
+
+function newSessionLog() {
+  return { puzzles: {}, review: null };
+}
+function puzzleLog() {
+  if (!state.sessionLog || state.mode !== 'puzzle') return null;
+  const p = puzzle();
+  return (state.sessionLog.puzzles[p.id] ||= { theme: p.theme, wrong: [], hints: 0, solved: false, gaveUp: false });
+}
 
 const puzzle = () => state.puzzles[state.index];
 
@@ -206,6 +218,7 @@ async function playerMove(from, to) {
   if (!correct) {
     render();
     setStatus(`${move.san} isn't it. Try again.`, 'bad');
+    puzzleLog()?.wrong.push(move.san);
     document.querySelector(`[data-square="${to}"]`)?.classList.add('wrong');
     // Take the move back on a fixed timer, independent of the engine call, so
     // a slow server never leaves the board locked.
@@ -235,6 +248,8 @@ async function playerMove(from, to) {
 
   if (state.chess.isCheckmate() || state.ply >= p.line.length) {
     state.solved = true;
+    const pl = puzzleLog();
+    if (pl) pl.solved = true;
     setStatus('Solved! ✓', 'good');
     sendRespond(
       `[board] ${who} played ${move.san} (${moveWords}). Correct, and that SOLVES the puzzle (theme: ${p.theme}). ` +
@@ -274,6 +289,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function playSolution() {
   const p = puzzle();
+  const pl = puzzleLog();
+  if (pl && !pl.solved) pl.gaveUp = true;
   state.busy = true;
   state.chess = new Chess(p.fen);
   state.sanLog = [];
@@ -332,6 +349,16 @@ async function loadReview(pgn, side) {
     renderReviewPanel();
     gotoPly(0);
     log('review', 'in', `Analyzed ${review.moves.length} half-moves, ${review.keyMoments.length} key moments`);
+    if (state.sessionLog) {
+      state.sessionLog.review = {
+        game: `${h.White} vs ${h.Black}`,
+        mistakes: review.keyMoments.map((k) => {
+          const m = review.moves[k.ply - 1];
+          return `${moveLabel(m)} (${m.class}, engine wanted ${m.bestSan})`;
+        }),
+        tries: [],
+      };
+    }
     if (state.conversationId) {
       sendRespond(review.context + ' The student just loaded this game. In one or two sentences, give your overall impression and offer to start with the first key moment.');
     }
@@ -437,6 +464,7 @@ async function reviewTry(from, to) {
   const who = state.player || 'The student';
   try {
     const j = await api('/api/judge', { fen, move: move.lan });
+    state.sessionLog?.review?.tries.push({ moment: state.moment, move: j.san, ok: j.ok });
     if (j.ok) {
       state.trying = false;
       setStatus(`${j.san} works! ✓`, 'good');
@@ -517,6 +545,8 @@ const TOOL_HANDLERS = {
   },
 
   async chess_show_on_board(args) {
+    const pl = puzzleLog();
+    if (pl && !pl.solved) pl.hints += 1;
     const squares = (args.squares || []).filter((s) => /^[a-h][1-8]$/.test(s));
     const arrows = (args.arrows || [])
       .map((a) => String(a).toLowerCase().match(/([a-h][1-8]).*?([a-h][1-8])/))
@@ -536,6 +566,13 @@ const TOOL_HANDLERS = {
     const which = args.which || 'next';
     let target = state.index;
     if (which === 'next') target = state.index + 1;
+    if (which === 'theme' && args.theme) {
+      const want = String(args.theme).toLowerCase();
+      const words = want.split(/[^a-z]+/).filter((w) => w.length > 3);
+      const i = state.puzzles.findIndex((p) => p.theme.includes(want) || words.some((w) => p.theme.includes(w)));
+      if (i >= 0) target = i;
+      else return `No puzzle with the theme "${args.theme}". Available: ${state.puzzles.map((p) => p.theme).join(', ')}.`;
+    }
     if (which === 'harder' || which === 'easier') {
       const level = puzzle().level + (which === 'harder' ? 1 : -1);
       const candidates = state.puzzles.map((p, i) => ({ p, i })).filter(({ p, i }) => p.level === level && i !== state.index);
@@ -631,9 +668,11 @@ async function startSession() {
   $('start').disabled = true;
   $('start').textContent = 'Starting…';
   try {
-    const { conversation_id, conversation_url } = await api('/api/session', { player: state.player, code: $('code').value.trim() });
+    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, code: $('code').value.trim() });
     state.conversationId = conversation_id;
-    log('session', 'in', `Conversation ${conversation_id} created`);
+    state.sessionLog = newSessionLog();
+    log('session', 'in', `Conversation ${conversation_id} created${returning ? ' (returning student: last session notes sent to the coach)' : ''}`);
+    $('start').textContent = 'Click Join in the video panel';
     $('videoEmpty').hidden = true;
     state.call = window.Daily.createFrame($('video'), {
       showLeaveButton: true,
@@ -641,6 +680,7 @@ async function startSession() {
     });
     state.call.on('app-message', onAppMessage);
     state.call.on('left-meeting', endSession);
+    state.call.on('error', (ev) => log('video error', 'err', ev?.errorMsg || 'Video call error'));
     let briefed = false;
     state.call.on('participant-joined', async (ev) => {
       // The PAL joins as a remote participant. Brief it on the board once.
@@ -653,8 +693,14 @@ async function startSession() {
     $('start').hidden = true;
     $('stop').hidden = false;
   } catch (e) {
-    log('error', 'err', e.message);
-    alert(`Couldn't start the session: ${e.message}`);
+    const msg = e?.message || e?.errorMsg || 'the video call could not connect';
+    log('error', 'err', msg);
+    alert(`Couldn't start the session: ${msg}`);
+    if (state.call) {
+      try { state.call.destroy(); } catch {}
+      state.call = null;
+    }
+    state.conversationId = null;
     $('videoEmpty').hidden = false;
   } finally {
     $('start').disabled = false;
@@ -675,9 +721,72 @@ async function endSession() {
   $('start').hidden = false;
   $('stop').hidden = true;
   if (id) {
-    api('/api/session/end', { conversation_id: id }).catch(() => {});
     log('session', 'in', `Conversation ${id} ended`);
+    const summary = state.sessionLog
+      ? { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review }
+      : null;
+    state.sessionLog = null;
+    try {
+      const r = await api('/api/session/end', { conversation_id: id, player: state.player, code: $('code').value.trim(), summary });
+      if (r.saved) log('memory → pinned session note', 'out', r.note);
+      else if (state.player) log('memory', 'in', `No session note saved (${r.reason || 'nothing to save'})`);
+    } catch {}
+    loadNotebook();
   }
+}
+
+// ---------------------------------------------------------------- notebook
+// "What Coach Rook remembers about you": the student's Tavus memory store,
+// shown on screen so memory is something you can see, not just hear.
+async function loadNotebook() {
+  const name = $('player').value.trim();
+  const code = $('code').value.trim();
+  const box = $('notebook');
+  if (!name || !state.tavusReady || ($('code').hidden === false && !code)) {
+    box.hidden = true;
+    return;
+  }
+  try {
+    const mem = await api('/api/memory', { player: name, code });
+    box.hidden = false;
+    $('nbName').textContent = name;
+    const list = $('nbNotes');
+    list.innerHTML = '';
+    const notes = mem.pinned || [];
+    const learned = mem.learned && learnedLines(mem.learned);
+    if (!notes.length && !learned?.length) {
+      list.innerHTML = '<li class="muted">Nothing yet. After your first session, Coach Rook writes down what you nailed and what tripped you up.</li>';
+      return;
+    }
+    for (const n of notes.slice(-5).reverse()) {
+      const li = document.createElement('li');
+      li.textContent = n.text;
+      list.appendChild(li);
+    }
+    for (const l of (learned || []).slice(0, 4)) {
+      const li = document.createElement('li');
+      li.className = 'learned';
+      li.textContent = l;
+      list.appendChild(li);
+    }
+  } catch (e) {
+    box.hidden = true;
+  }
+}
+
+// Flatten Tavus learned memory (profile object + timeline) into a few lines.
+function learnedLines(learned) {
+  const out = [];
+  const walk = (obj, prefix) => {
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, prefix ? `${prefix} › ${k}` : k);
+      else out.push(`Learned: ${prefix ? prefix + ' › ' : ''}${k.replace(/_/g, ' ')}: ${Array.isArray(v) ? v.join(', ') : v}`);
+    }
+  };
+  walk(learned.profile, '');
+  const recent = learned.timeline?.recent_conversations;
+  if (Array.isArray(recent)) recent.slice(-2).forEach((c) => c?.summary && out.push(`Last call: ${c.summary}`));
+  return out;
 }
 
 // ---------------------------------------------------------------- simulator
@@ -745,7 +854,16 @@ async function boot() {
   });
   $('stop').addEventListener('click', endSession);
   const cfg = await api('/api/config');
+  state.tavusReady = cfg.tavusReady;
   if (cfg.needsCode) $('code').hidden = false;
+  try { $('code').value = localStorage.getItem('coach-rook-code') || ''; } catch {}
+  const refresh = () => {
+    try { localStorage.setItem('coach-rook-code', $('code').value.trim()); } catch {}
+    loadNotebook();
+  };
+  $('player').addEventListener('change', refresh);
+  $('code').addEventListener('change', refresh);
+  loadNotebook();
   if (!cfg.tavusReady) {
     $('start').disabled = true;
     $('setupHint').textContent = 'Video coach not configured on this server (set TAVUS_API_KEY and run npm run setup). The board and engine still work.';

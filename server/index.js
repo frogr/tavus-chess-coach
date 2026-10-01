@@ -10,6 +10,7 @@ const { describePosition, summarizeAnalysis, scoreWords } = require('./chessText
 const { tavus } = require('./tavus');
 const PUZZLES = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
+const { participantTag, getMemory, recordSession } = require('./memory');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -66,6 +67,19 @@ function parseMove(fen, text) {
   } catch {
     return null;
   }
+}
+
+function checkCode(code) {
+  // On a public deploy, every session spends the owner's Tavus minutes.
+  if (ACCESS_CODE && code !== ACCESS_CODE) throw Object.assign(new Error('Wrong access code.'), { status: 401 });
+}
+
+function requirePal() {
+  const cfg = tavusConfig();
+  if (!process.env.TAVUS_API_KEY || !cfg.pal_id) {
+    throw Object.assign(new Error('Video coach is not configured on this server.'), { status: 400 });
+  }
+  return cfg;
 }
 
 const routes = {
@@ -127,21 +141,44 @@ const routes = {
   },
 
   'POST /api/session': async ({ player, code }) => {
-    // On a public deploy, every session spends the owner's Tavus minutes.
-    if (ACCESS_CODE && code !== ACCESS_CODE) throw Object.assign(new Error('Wrong access code.'), { status: 401 });
-    const cfg = tavusConfig();
-    if (!cfg.pal_id) throw Object.assign(new Error('No PAL configured. Run `npm run setup` first.'), { status: 400 });
+    checkCode(code);
+    const cfg = requirePal();
     const name = String(player || '').trim().slice(0, 40) || null;
-    const tag = name ? `chess-student-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : null;
+    const tag = participantTag(name);
+
+    // Returning student? Read their session notes so the opener can pick up
+    // exactly where they left off. (Tavus also gives the PAL these pinned
+    // memories plus its learned memory; putting the latest notes in the
+    // conversational context makes the generated greeting use them.)
+    let notes = [];
+    if (tag) notes = (await getMemory(cfg.pal_id, name).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
+    const recent = notes.filter((n) => n.startsWith('Session note')).slice(-3);
+    const returning = recent.length > 0;
+
+    const context = [
+      name ? `The student's name is ${name}.` : null,
+      returning
+        ? `This is a RETURNING student. Notes from their recent sessions, oldest first: ${recent.join(' ')} ` +
+          `Open by greeting them by name and referencing one specific thing from the most recent note (what they nailed or what tripped them up), ` +
+          `then propose what to work on today, e.g. a puzzle on the theme they struggled with (use chess_load_puzzle with that theme).`
+        : name
+          ? 'This is their first session with you. Welcome them and get them started on the puzzle on the board.'
+          : null,
+    ].filter(Boolean).join(' ');
+
     const convo = await tavus('POST', '/conversations', {
       pal_id: cfg.pal_id,
       conversation_name: `Chess coaching${name ? ` with ${name}` : ''}`,
       // Same tag -> same memory store, so Coach Rook remembers this student next time.
       ...(tag ? { participant_tags: [tag] } : {}),
-      conversational_context: name ? `The student's name is ${name}.` : undefined,
-      custom_greeting: name
-        ? `Hey ${name}, I'm Coach Rook. There's a puzzle on the board. Take a look and tell me what jumps out at you.`
-        : undefined,
+      conversational_context: context || undefined,
+      ...(returning
+        ? { dynamic_greeting: true } // generated from the context above, so it can reference last time
+        : {
+            custom_greeting: name
+              ? `Hey ${name}, I'm Coach Rook. There's a puzzle on the board. Take a look and tell me what jumps out at you.`
+              : undefined,
+          }),
       properties: {
         max_call_duration: 900,
         participant_left_timeout: 20,
@@ -149,13 +186,26 @@ const routes = {
         enable_closed_captions: true,
       },
     });
-    return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url };
+    return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning };
   },
 
-  'POST /api/session/end': async ({ conversation_id }) => {
-    if (!/^[a-z0-9]+$/i.test(conversation_id || '')) return { ok: false };
-    await tavus('POST', `/conversations/${conversation_id}/end`).catch(() => {});
-    return { ok: true };
+  // End the call and write what happened on the board into the student's memory.
+  'POST /api/session/end': async ({ conversation_id, player, code, summary }) => {
+    if (/^[a-z0-9]+$/i.test(conversation_id || '')) {
+      await tavus('POST', `/conversations/${conversation_id}/end`).catch(() => {});
+    }
+    if (!player || !summary || (ACCESS_CODE && code !== ACCESS_CODE)) return { ok: true, saved: false };
+    const cfg = tavusConfig();
+    if (!cfg.pal_id) return { ok: true, saved: false };
+    const result = await recordSession(cfg.pal_id, player, summary).catch((e) => ({ saved: false, reason: e.message }));
+    return { ok: true, ...result };
+  },
+
+  // What Coach Rook remembers about a student (pinned notes + Tavus learned memory).
+  'POST /api/memory': async ({ player, code }) => {
+    checkCode(code);
+    const cfg = requirePal();
+    return getMemory(cfg.pal_id, player);
   },
 };
 

@@ -20,6 +20,15 @@ Render reads `render.yaml`, asks for `TAVUS_API_KEY` and an `ACCESS_CODE`, and b
 
 Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes.
 
+## Memory: the coach remembers you
+
+Coaching only works if the coach remembers you. Coach Rook uses Tavus Memory Stores in two layers:
+
+- **Session notes (pinned memory).** When a session ends, the board writes one factual note to your memory store: what you solved first try, what took wrong tries or hints (and which moves you tried), what you gave up on, and the mistakes from any game you reviewed. These are ground truth from the board, not the model's impression of the call, and pinned memories reach the PAL from the very next conversation with no processing delay.
+- **Learned memory.** Tavus maintains it automatically from each conversation (goals you mention, how you like to be coached).
+
+Next session, the latest notes go into the conversation context and the greeting is generated from them, so Coach Rook opens with "Welcome back, Austin. Last time the knight fork took you two tries, want to start there?" and can load a puzzle on that exact theme. The **Coach's notebook** panel shows what's in your memory store, so memory is something you can see, not just hear.
+
 ## Why this project
 
 Coaching is where face-to-face AI is strongest. A good chess coach isn't a database of answers. They watch you think, wait while you stare at the board, ask a question instead of giving the move away, and point: "look at *this* knight." Text chat can't do the waiting or the pointing. A video PAL can, as long as it's wired into the thing you're both looking at.
@@ -68,7 +77,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)". This was the single biggest reliability lever.
 - **Every puzzle is engine-verified.** `npm run verify-puzzles` checks that each solution's first move is Stockfish's unique top choice and the line is decisive. I rejected two of my own candidates this way (one had several equally winning answers, one was a dead draw).
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while you calculate, and `idle_engagement: patient` gives a gentle nudge rather than an answer when you go quiet.
-- **Memory per student.** Entering a name sets a `participant_tags` value, so next session Coach Rook can say "last time the back-rank stuff clicked, let's try something harder."
+- **Memory is written from the board, not inferred from the call.** Pinned session notes come from what actually happened on the board; Tavus learned memory adds the softer context. (For a real product, the participant tag would be a user ID, not a typed name.)
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general STT mangles.
 - **Key stays on the server.** The browser only ever gets a `conversation_url`.
 - **Setup is code, not clicks.** `npm run setup` is idempotent: tools are matched by name and patched, the PAL is found by ID or name and patched in place. A customer can re-run it after every prompt change and diff the config in git, and a fresh deploy configures itself on boot.
@@ -86,7 +95,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 ## What I'd do next
 
 - **Perception tool:** a Raven visual query for "the student looks frustrated or stuck" that triggers an earlier hint.
-- **Post-call action:** write a short session summary (patterns missed, patterns learned) into pinned memory, rather than relying only on learned memory.
+- **Spaced repetition from memory:** schedule a theme you missed to come back two sessions later, and track each theme's hit rate over time.
 - **Real puzzle supply:** the Lichess puzzle database filtered by theme and rating, with the same verify step in the import.
 - **Voice moves:** "knight to d6" spoken → move played, via a tool that parses the move and plays it on the board.
 - **Play a game against the coach:** Stockfish at reduced strength as the opponent, with the coach speaking up only at moments that matter (a big swing, a tactic on the board), not on every move.
