@@ -101,3 +101,31 @@ h1 { margin: 2px 0 0; font-size: 22px; }
 .log li.say .kind { color: #9ab8ff; }
 .log li.err .kind { color: var(--bad); }
 .log pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+
+/* modes */
+body[data-mode="puzzle"] .review-only { display: none; }
+body[data-mode="review"] .puzzle-only { display: none; }
+.tabs { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; background: var(--panel); }
+.tabs button { border: 0; background: transparent; color: var(--muted); padding: 6px 12px; }
+.tabs button.active { background: var(--panel-2); color: var(--text); }
+
+/* review */
+.review { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.review textarea { width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 12px; resize: vertical; margin-top: 8px; }
+.review summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.review select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin-left: 4px; }
+.small-btn { padding: 6px 10px; font-size: 12px; }
+.nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.nav > button { padding: 6px 10px; }
+.moments { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 5px 10px; font-size: 12px; border-radius: 99px; font-family: 'JetBrains Mono', monospace; }
+.chip.blunder { border-color: var(--bad); color: var(--bad); }
+.chip.mistake { border-color: #f2a14e; color: #f2a14e; }
+.chip.inaccuracy { border-color: #e6d36a; color: #e6d36a; }
+.game-moves { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; max-height: 140px; overflow: auto; font-family: 'JetBrains Mono', monospace; }
+.mv { padding: 3px 7px; font-size: 12px; border-color: transparent; background: transparent; color: var(--muted); }
+.mv.inaccuracy { color: #e6d36a; }
+.mv.mistake { color: #f2a14e; }
+.mv.blunder { color: var(--bad); }
+.mv.key { border-color: var(--line); }
+.mv.cur { background: var(--panel-2); color: var(--text); border-color: var(--accent); }

@@ -25,6 +25,12 @@ const state = {
   call: null,
   conversationId: null,
   player: '',
+  mode: 'puzzle', // 'puzzle' | 'review'
+  orientation: 'w', // which side is at the bottom
+  review: null, // result of /api/review
+  reviewPly: 0, // half-moves shown on the board in review mode
+  moment: null, // key moment being worked on (1-based), or null
+  trying: false, // student may move pieces to try a better move
 };
 
 const puzzle = () => state.puzzles[state.index];
@@ -60,8 +66,12 @@ function render() {
     ? state.chess.moves({ square: state.selected, verbose: true }).map((m) => m.to)
     : [];
   const grid = state.chess.board(); // rank 8 first
-  for (let r = 0; r < 8; r++) {
-    for (let f = 0; f < 8; f++) {
+  const flip = state.orientation === 'b';
+  for (let vr = 0; vr < 8; vr++) {
+    for (let vf = 0; vf < 8; vf++) {
+      // vr/vf are on-screen row/col; r/f are board row (8th rank = 0) and file.
+      const r = flip ? 7 - vr : vr;
+      const f = flip ? 7 - vf : vf;
       const square = FILES[f] + (8 - r);
       const el = document.createElement('div');
       el.className = `sq ${(r + f) % 2 === 0 ? 'l' : 'd'}`;
@@ -78,18 +88,20 @@ function render() {
         pc.title = `${p.color === 'w' ? 'White' : 'Black'} ${p.type}`;
         el.appendChild(pc);
       }
-      if (f === 0) el.insertAdjacentHTML('beforeend', `<span class="coord r">${8 - r}</span>`);
-      if (r === 7) el.insertAdjacentHTML('beforeend', `<span class="coord f">${FILES[f]}</span>`);
+      if (vf === 0) el.insertAdjacentHTML('beforeend', `<span class="coord r">${8 - r}</span>`);
+      if (vr === 7) el.insertAdjacentHTML('beforeend', `<span class="coord f">${FILES[f]}</span>`);
       el.addEventListener('click', () => onSquare(square));
       board.appendChild(el);
     }
   }
   renderArrows();
-  $('moves').textContent = state.sanLog.join(' ');
+  $('moves').textContent = state.mode === 'puzzle' ? state.sanLog.join(' ') : '';
 }
 
 function sqCenter(sq) {
-  return { x: FILES.indexOf(sq[0]) + 0.5, y: 8 - Number(sq[1]) + 0.5 };
+  const x = FILES.indexOf(sq[0]) + 0.5;
+  const y = 8 - Number(sq[1]) + 0.5;
+  return state.orientation === 'b' ? { x: 8 - x, y: 8 - y } : { x, y };
 }
 
 function renderArrows() {
@@ -128,6 +140,7 @@ function sideName(color) {
 
 async function loadPuzzle(index, { announce = true } = {}) {
   state.index = (index + state.puzzles.length) % state.puzzles.length;
+  setMode('puzzle');
   const p = puzzle();
   state.chess = new Chess(p.fen);
   state.ply = 0;
@@ -160,7 +173,8 @@ async function puzzleContext(p) {
 }
 
 function onSquare(square) {
-  if (state.busy || state.solved) return;
+  if (state.mode === 'review' && !state.trying) return;
+  if (state.busy || (state.mode === 'puzzle' && state.solved)) return;
   const piece = state.chess.get(square);
   const myTurn = state.chess.turn();
   if (state.selected) {
@@ -168,7 +182,8 @@ function onSquare(square) {
     const legal = state.chess.moves({ square: from, verbose: true }).find((m) => m.to === square);
     if (legal) {
       state.selected = null;
-      playerMove(from, square);
+      if (state.mode === 'review') reviewTry(from, square);
+      else playerMove(from, square);
       return;
     }
   }
@@ -277,6 +292,219 @@ async function playSolution() {
   return `The board is now animating the full solution: ${state.sanLog.join(' ')}. Idea: ${p.idea} Walk the student through why it works in one or two sentences, then offer the next puzzle.`;
 }
 
+// ---------------------------------------------------------------- game review
+function setMode(mode) {
+  if (state.mode === mode) return;
+  state.mode = mode;
+  document.body.dataset.mode = mode;
+  document.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === mode));
+  if (mode === 'puzzle') state.orientation = 'w';
+}
+
+function moveLabel(m) {
+  return `${m.moveNumber}${m.color === 'w' ? '.' : '...'} ${m.san}${m.symbol || ''}`;
+}
+
+function evalText(cp) {
+  if (Math.abs(cp) >= 9000) {
+    const n = Math.round((10000 - Math.abs(cp)) / 10);
+    return n === 0 ? 'checkmate' : `${cp > 0 ? '+' : '-'}M${n}`;
+  }
+  return `${cp > 0 ? '+' : ''}${(cp / 100).toFixed(1)}`;
+}
+
+async function loadReview(pgn, side) {
+  setMode('review');
+  $('reviewGo').disabled = true;
+  $('reviewGo').textContent = 'Analyzing…';
+  $('pTitle').textContent = 'Analyzing your game…';
+  $('pLevel').textContent = 'Game review';
+  setStatus('Stockfish is checking every move', '');
+  try {
+    const review = await api('/api/review', { pgn, side, player: state.player || $('player').value.trim() });
+    state.review = review;
+    state.orientation = side === 'b' ? 'b' : 'w';
+    const h = review.headers;
+    $('pTitle').textContent = `${h.White} vs ${h.Black}`;
+    $('pLevel').textContent = `Game review · ${h.Result}${h.Event ? ' · ' + h.Event : ''}`;
+    renderReviewPanel();
+    gotoPly(0);
+    log('review', 'in', `Analyzed ${review.moves.length} half-moves, ${review.keyMoments.length} key moments`);
+    if (state.conversationId) {
+      sendRespond(review.context + ' The student just loaded this game. In one or two sentences, give your overall impression and offer to start with the first key moment.');
+    }
+  } catch (e) {
+    setStatus(e.message, 'bad');
+    log('error', 'err', e.message);
+  } finally {
+    $('reviewGo').disabled = false;
+    $('reviewGo').textContent = 'Analyze game';
+  }
+}
+
+function renderReviewPanel() {
+  const r = state.review;
+  const list = $('gameMoves');
+  list.innerHTML = '';
+  const keyPlies = new Set(r.keyMoments.map((k) => k.ply));
+  r.moves.forEach((m) => {
+    const b = document.createElement('button');
+    b.className = `mv ${m.class || ''} ${keyPlies.has(m.ply) ? 'key' : ''}`;
+    b.textContent = m.color === 'w' ? `${m.moveNumber}. ${m.san}${m.symbol}` : `${m.san}${m.symbol}`;
+    b.dataset.ply = m.ply;
+    b.addEventListener('click', () => gotoPly(m.ply));
+    list.appendChild(b);
+  });
+  const chips = $('moments');
+  chips.innerHTML = '';
+  if (!r.keyMoments.length) chips.innerHTML = '<span class="muted small">No real mistakes found for your side. Nice game.</span>';
+  r.keyMoments.forEach((k) => {
+    const m = r.moves[k.ply - 1];
+    const b = document.createElement('button');
+    b.className = `chip ${m.class}`;
+    b.textContent = `${k.index}. ${moveLabel(m)}`;
+    b.title = k.text;
+    b.addEventListener('click', () => {
+      const text = gotoMoment(k.index);
+      if (state.conversationId) sendRespond(`[board] The student opened key moment ${k.index} themselves. ${text}`);
+    });
+    chips.appendChild(b);
+  });
+  $('reviewResult').hidden = false;
+}
+
+function gotoPly(ply) {
+  const r = state.review;
+  if (!r) return;
+  ply = Math.max(0, Math.min(r.moves.length, ply));
+  state.reviewPly = ply;
+  state.moment = null;
+  state.trying = false;
+  state.selected = null;
+  state.highlights = [];
+  state.arrows = [];
+  const m = r.moves[ply - 1];
+  state.chess = new Chess(m ? m.fenAfter : r.startFen);
+  state.lastMove = m ? { from: m.uci.slice(0, 2), to: m.uci.slice(2, 4) } : null;
+  if (m) {
+    const cls = m.class ? ` · ${m.class}` : '';
+    setStatus(`${moveLabel(m)} · eval ${evalText(m.evalAfter)}${cls}`, m.class === 'blunder' || m.class === 'mistake' ? 'bad' : '');
+    if (m.class && m.bestSan) {
+      state.arrows = [[m.best.slice(0, 2), m.best.slice(2, 4)]];
+    }
+  } else {
+    setStatus('Start of game', '');
+  }
+  document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === ply));
+  document.querySelector('.mv.cur')?.scrollIntoView({ block: 'nearest' });
+  render();
+}
+
+// Put the board just BEFORE the key move and let the student look for better.
+function gotoMoment(n) {
+  const r = state.review;
+  const k = r.keyMoments[Math.max(0, Math.min(r.keyMoments.length - 1, n - 1))];
+  if (!k) return 'This game has no key moments for the student.';
+  const m = r.moves[k.ply - 1];
+  const prev = r.moves[k.ply - 2];
+  state.reviewPly = k.ply - 1;
+  state.moment = k.index;
+  state.trying = true;
+  state.selected = null;
+  state.highlights = [];
+  state.arrows = [];
+  state.chess = new Chess(m.fenBefore);
+  state.lastMove = prev ? { from: prev.uci.slice(0, 2), to: prev.uci.slice(2, 4) } : null;
+  setStatus(`Moment ${k.index}: you played ${m.san}. Find something better.`, '');
+  document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === k.ply - 1));
+  render();
+  return (
+    `Board now shows key moment ${k.index}, the position BEFORE the student's move ${moveLabel(m)}. ` +
+    `${k.text} The student can now move pieces to try a better move. Ask what they were thinking, then let them look; ` +
+    `don't say the engine's move unless they give up.`
+  );
+}
+
+async function reviewTry(from, to) {
+  const fen = state.chess.fen();
+  const move = state.chess.move({ from, to, promotion: 'q' });
+  state.lastMove = move;
+  state.busy = true;
+  render();
+  setStatus('Checking with the engine…', '');
+  const who = state.player || 'The student';
+  try {
+    const j = await api('/api/judge', { fen, move: move.lan });
+    if (j.ok) {
+      state.trying = false;
+      setStatus(`${j.san} works! ✓`, 'good');
+      sendRespond(
+        `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). The engine approves: evaluation after it is ${j.evalAfter}` +
+          `${j.san === j.bestSan ? ", and it is the engine's top choice" : `, about as good as the engine's top choice ${j.bestSan}`}. ` +
+          `Praise what they found, explain the idea in a sentence, and offer the next key moment.`
+      );
+    } else {
+      setStatus(`${j.san} isn't better. Try again.`, 'bad');
+      setTimeout(() => {
+        state.chess.undo();
+        state.lastMove = null;
+        render();
+      }, 900);
+      sendRespond(
+        `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). Not good enough: evaluation after it is ${j.evalAfter}, ` +
+          `while the best move keeps ${j.evalBest}. The board took it back. Engine's best (secret unless they give up): ${j.bestSan}, line ${j.bestLine.join(' ')}. ` +
+          `Say briefly what their try allows and nudge them toward the idea.`
+      );
+    }
+  } catch (e) {
+    state.chess.undo();
+    setStatus(e.message, 'bad');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function animateLine(fen, sans) {
+  state.busy = true;
+  state.trying = false;
+  state.highlights = [];
+  state.arrows = [];
+  state.chess = new Chess(fen);
+  render();
+  const played = [];
+  for (const san of sans) {
+    await sleep(850);
+    try {
+      const m = state.chess.move(san);
+      played.push(m.san);
+      state.lastMove = m;
+      render();
+    } catch {
+      break;
+    }
+  }
+  state.busy = false;
+  return played;
+}
+
+async function showEngineLine() {
+  const r = state.review;
+  const k = state.moment ? r.keyMoments[state.moment - 1] : null;
+  const m = k ? r.moves[k.ply - 1] : r.moves[state.reviewPly];
+  if (!m || !m.bestLine.length) return 'There is no engine line to show here.';
+  const line = m.bestLine.slice(0, 5);
+  setStatus(`Engine line: ${line.join(' ')}`, '');
+  const played = await animateLine(m.fenBefore, line);
+  // Leave the line on the board for a beat, then return to the moment.
+  setTimeout(() => {
+    if (state.mode !== 'review') return;
+    if (k) gotoMoment(k.index);
+    else gotoPly(state.reviewPly);
+  }, 4000);
+  return `The board animated the engine's line instead of ${m.san}: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
+}
+
 // ---------------------------------------------------------------- tool calls
 // Each handler runs a PAL tool call against the real board / engine and returns
 // the string Tavus feeds back to the LLM (conversation.tool_result).
@@ -316,7 +544,19 @@ const TOOL_HANDLERS = {
   },
 
   async chess_play_solution() {
+    if (state.mode === 'review') return showEngineLine();
     return playSolution();
+  },
+
+  async chess_goto_moment(args) {
+    if (state.mode !== 'review' || !state.review) return 'No game is loaded for review. The student can paste one in the "Review a game" tab.';
+    return gotoMoment(Number(args.moment) || 1);
+  },
+
+  async chess_show_engine_line() {
+    if (state.mode === 'review') return showEngineLine();
+    const a = await api('/api/analyze', { fen: state.chess.fen() });
+    return animateLine(state.chess.fen(), a.best ? a.best.san.slice(0, 4) : []);
   },
 };
 
@@ -404,7 +644,8 @@ async function startSession() {
       // The PAL joins as a remote participant. Brief it on the board once.
       if (briefed || ev.participant.local) return;
       briefed = true;
-      sendContext(await puzzleContext(puzzle()) + (state.ply ? ` Moves played so far: ${state.sanLog.join(' ')}.` : ''));
+      if (state.mode === 'review' && state.review) sendContext(state.review.context);
+      else sendContext(await puzzleContext(puzzle()) + (state.ply ? ` Moves played so far: ${state.sanLog.join(' ')}.` : ''));
     });
     await state.call.join({ url: conversation_url, userName: state.player || 'Student' });
     $('start').hidden = true;
@@ -452,6 +693,8 @@ function setupSim() {
     }
     if (which === 'next') fake('chess_load_puzzle', { which: 'next' });
     if (which === 'solution') fake('chess_play_solution', {});
+    if (which === 'moment') fake('chess_goto_moment', { moment: 1 });
+    if (which === 'line') fake('chess_show_engine_line', {});
   });
 }
 
@@ -463,6 +706,41 @@ async function boot() {
   $('retry').addEventListener('click', () => loadPuzzle(state.index));
   $('next').addEventListener('click', () => loadPuzzle(state.index + 1));
   $('start').addEventListener('click', startSession);
+  document.querySelectorAll('[data-tab]').forEach((t) =>
+    t.addEventListener('click', () => {
+      if (t.dataset.tab === 'puzzle') loadPuzzle(state.index);
+      else {
+        setMode('review');
+        if (state.review) gotoPly(state.reviewPly);
+        else {
+          $('pTitle').textContent = 'Review one of your games';
+          $('pLevel').textContent = 'Game review';
+          setStatus('Paste a PGN or a Lichess link below', '');
+        }
+      }
+    })
+  );
+  $('reviewGo').addEventListener('click', () => {
+    const pgn = $('pgn').value.trim();
+    if (pgn) loadReview(pgn, $('side').value);
+  });
+  document.querySelectorAll('[data-sample]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const text = await (await fetch(`/samples/${b.dataset.sample}.pgn`)).text();
+      $('pgn').value = text;
+      $('side').value = b.dataset.side;
+      loadReview(text, b.dataset.side);
+    })
+  );
+  $('navStart').addEventListener('click', () => gotoPly(0));
+  $('navPrev').addEventListener('click', () => gotoPly(state.reviewPly - 1));
+  $('navNext').addEventListener('click', () => gotoPly(state.reviewPly + 1));
+  $('navEnd').addEventListener('click', () => gotoPly(1e9));
+  document.addEventListener('keydown', (e) => {
+    if (state.mode !== 'review' || !state.review || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowLeft') gotoPly(state.reviewPly - 1);
+    if (e.key === 'ArrowRight') gotoPly(state.reviewPly + 1);
+  });
   $('stop').addEventListener('click', endSession);
   const cfg = await api('/api/config');
   if (!cfg.tavusReady) {

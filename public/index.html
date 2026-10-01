@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/styles.css" />
   <script crossorigin src="https://unpkg.com/@daily-co/daily-js"></script>
 </head>
-<body>
+<body data-mode="puzzle">
   <header class="topbar">
     <div class="brand"><span class="logo">♜</span> Coach Rook <span class="tag">Tavus CVI demo</span></div>
     <div class="session">
@@ -33,6 +33,10 @@
     </section>
 
     <section class="boardcol">
+      <nav class="tabs">
+        <button data-tab="puzzle" class="active">Puzzles</button>
+        <button data-tab="review">Review a game</button>
+      </nav>
       <div class="puzzle-head">
         <div>
           <div class="eyebrow" id="pLevel">Puzzle</div>
@@ -50,10 +54,37 @@
           </defs>
         </svg>
       </div>
-      <div class="controls">
+      <div class="controls puzzle-only">
         <button id="retry" class="ghost">Reset puzzle</button>
         <button id="next" class="ghost">Next puzzle →</button>
         <span class="moves" id="moves"></span>
+      </div>
+
+      <div class="review-only review">
+        <div id="reviewResult" hidden>
+          <div class="nav">
+            <button id="navStart" class="ghost" title="Start">⏮</button>
+            <button id="navPrev" class="ghost" title="Previous (←)">◀</button>
+            <button id="navNext" class="ghost" title="Next (→)">▶</button>
+            <button id="navEnd" class="ghost" title="End">⏭</button>
+            <span class="muted small">Key moments:</span>
+            <span id="moments" class="moments"></span>
+          </div>
+          <div id="gameMoves" class="game-moves"></div>
+        </div>
+        <details id="reviewInput" open>
+          <summary>Load a game</summary>
+          <textarea id="pgn" rows="5" placeholder="Paste a PGN, or a Lichess game link (lichess.org/abcd1234)"></textarea>
+          <div class="controls">
+            <label class="small muted">I played
+              <select id="side"><option value="w">White</option><option value="b">Black</option></select>
+            </label>
+            <button id="reviewGo" class="primary">Analyze game</button>
+            <span class="muted small">or try:</span>
+            <button class="ghost small-btn" data-sample="legal-trap" data-side="b">A trap (as Black)</button>
+            <button class="ghost small-btn" data-sample="opera-game" data-side="b">Morphy's Opera Game (as Black)</button>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -66,6 +97,8 @@
         <button data-sim="hint">show_on_board</button>
         <button data-sim="next">load next</button>
         <button data-sim="solution">play solution</button>
+        <button data-sim="moment">goto moment 1</button>
+        <button data-sim="line">engine line</button>
       </div>
       <ol id="log" class="log"></ol>
     </aside>

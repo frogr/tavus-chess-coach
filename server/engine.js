@@ -10,13 +10,12 @@ function engine() {
   if (!sf) {
     sf = createEngine();
     sf.postMessage('uci');
-    sf.postMessage('setoption name MultiPV value 3');
     sf.postMessage('isready');
   }
   return sf;
 }
 
-function runAnalysis(fen, depth) {
+function runAnalysis(fen, depth, multipv) {
   return new Promise((resolve) => {
     const e = engine();
     const lines = {};
@@ -33,6 +32,7 @@ function runAnalysis(fen, depth) {
         resolve({ bestmove: line.split(/\s+/)[1], lines: Object.keys(lines).sort().map((k) => lines[k]) });
       }
     };
+    e.postMessage(`setoption name MultiPV value ${multipv}`);
     e.postMessage('ucinewgame');
     e.postMessage(`position fen ${fen}`);
     e.postMessage(`go depth ${depth}`);
@@ -40,8 +40,9 @@ function runAnalysis(fen, depth) {
 }
 
 // Serialize: stockfish.js is single-threaded and shares one onmessage.
-function analyze(fen, depth = 14) {
-  const job = queue.then(() => runAnalysis(fen, depth));
+// multipv: how many candidate lines to return (1 is ~2x faster; game review uses 1).
+function analyze(fen, depth = 14, { multipv = 3 } = {}) {
+  const job = queue.then(() => runAnalysis(fen, depth, multipv));
   queue = job.catch(() => {});
   return job;
 }

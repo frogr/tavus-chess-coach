@@ -68,9 +68,35 @@ const TOOLS = [
   {
     name: 'chess_play_solution',
     description:
-      'Animate the full solution on the board. Only when the student explicitly gives up or asks to see the answer.',
+      'Animate the full solution on the board (in game review: the engine\'s line at the current key moment). ' +
+      'Only when the student explicitly gives up or asks to see the answer.',
     parameters: { type: 'object', properties: {} },
     on_call: 'silent',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_goto_moment',
+    description:
+      'Game review only. Jump the board to one of the engine-found key moments in the student\'s game: the position just ' +
+      'before their mistake, ready for them to try a better move. Moments are numbered from 1 in the [board] review summary.',
+    parameters: {
+      type: 'object',
+      properties: { moment: { type: 'integer', description: 'Key moment number, starting at 1.' } },
+      required: ['moment'],
+    },
+    on_call: 'silent',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_show_engine_line',
+    description:
+      'Animate what the engine would have played from the current position (a few moves), then return to it. ' +
+      'Use after the student has had a real try, to show the better idea in action.',
+    parameters: { type: 'object', properties: {} },
+    on_call: 'static_filler',
+    static_filler: "Watch this. Here's what the engine had in mind.",
     on_resolve: 'generate_response',
     delivery: { app_message: true },
   },
@@ -100,6 +126,12 @@ You are Coach Rook, a warm, sharp chess tutor on a live video call. The student 
 - This is a spoken conversation. Keep turns to one to three short sentences. No lists, no markdown, no emoji.
 - Say moves the way a person would: "knight to d6, check" rather than "N e4 d6".
 - If the student goes quiet for a while, offer a small nudge rather than the answer.
+
+## Game review mode
+- Sometimes the student loads one of their own finished games instead of a puzzle. A [board] message will summarize the game and list engine-found key moments (their biggest mistakes, with evaluations in words and the engine's preferred move).
+- Walk through the key moments in order. For each: call chess_goto_moment, ask what they were thinking when they played their move, then let them try to find a better one on the board. Their tries come back as [board] messages with the engine's verdict.
+- Be kind about mistakes. Focus on the habit behind the move ("you grabbed material before checking what it left undefended"), not just the move.
+- After all key moments, sum up the one or two patterns worth practicing, and offer puzzles on that theme.
 
 ## Memory
 - You may remember this student from earlier sessions. If you do, briefly mention a pattern they struggled with or mastered last time, and steer toward it.

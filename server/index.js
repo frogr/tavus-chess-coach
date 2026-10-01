@@ -9,6 +9,7 @@ const { analyze } = require('./engine');
 const { describePosition, summarizeAnalysis, scoreWords } = require('./chessText');
 const { tavus } = require('./tavus');
 const PUZZLES = require('./puzzles');
+const { reviewGame, reviewContext, judgeMove } = require('./review');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -106,6 +107,19 @@ const routes = {
       best: summary.best,
       lines: summary.lines,
     };
+  },
+
+  // Game review: engine pass over a whole game + a compact summary for the PAL.
+  'POST /api/review': async ({ pgn, side, player }) => {
+    const s = side === 'w' || side === 'b' ? side : null;
+    const review = await reviewGame(pgn, s);
+    return { ...review, context: reviewContext(review, player) };
+  },
+
+  'POST /api/judge': async ({ fen, move }) => {
+    new Chess(fen);
+    if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move || '')) throw Object.assign(new Error('bad move'), { status: 400 });
+    return judgeMove(fen, move);
   },
 
   'POST /api/session': async ({ player }) => {
