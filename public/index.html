@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coach Rook · chess puzzles with a face</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script crossorigin src="https://unpkg.com/@daily-co/daily-js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">♜</span> Coach Rook <span class="tag">Tavus CVI demo</span></div>
+    <div class="session">
+      <input id="player" placeholder="Your name (for memory)" maxlength="40" />
+      <button id="start" class="primary">Start coaching session</button>
+      <button id="stop" class="ghost" hidden>End session</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="coach">
+      <div id="video" class="video">
+        <div class="video-empty" id="videoEmpty">
+          <div class="big">♞</div>
+          <p>Coach Rook joins here on a live video call.</p>
+          <p class="muted" id="setupHint">Enter your name and start a session. You can already play the puzzle on the right.</p>
+        </div>
+      </div>
+      <div class="caption" id="caption"></div>
+    </section>
+
+    <section class="boardcol">
+      <div class="puzzle-head">
+        <div>
+          <div class="eyebrow" id="pLevel">Puzzle</div>
+          <h1 id="pTitle">Loading…</h1>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+      <div class="board-wrap">
+        <div id="board" class="board" aria-label="Chess board"></div>
+        <svg id="arrows" class="arrows" viewBox="0 0 8 8" preserveAspectRatio="none">
+          <defs>
+            <marker id="head" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto">
+              <path d="M0,0 L3,1.5 L0,3 z" fill="var(--arrow)" />
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <div class="controls">
+        <button id="retry" class="ghost">Reset puzzle</button>
+        <button id="next" class="ghost">Next puzzle →</button>
+        <span class="moves" id="moves"></span>
+      </div>
+    </section>
+
+    <aside class="feed">
+      <h2>Under the hood</h2>
+      <p class="muted small">Every tool call the PAL makes and every board event sent to it, live.</p>
+      <div id="sim" class="sim" hidden>
+        <div class="small muted">Simulator (no Tavus minutes used):</div>
+        <button data-sim="analyze">analyze</button>
+        <button data-sim="hint">show_on_board</button>
+        <button data-sim="next">load next</button>
+        <button data-sim="solution">play solution</button>
+      </div>
+      <ol id="log" class="log"></ol>
+    </aside>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

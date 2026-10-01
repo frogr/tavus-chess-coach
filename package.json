@@ -1,0 +1,17 @@
+{
+  "name": "coach-rook",
+  "version": "1.0.0",
+  "description": "A live video chess coach built on Tavus CVI: the PAL watches the board, points at squares, and checks every claim against Stockfish.",
+  "main": "server/index.js",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node server/index.js",
+    "verify-puzzles": "node scripts/verify-puzzles.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "stockfish": "^10.0.2"
+  }
+}
