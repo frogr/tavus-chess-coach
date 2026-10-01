@@ -196,7 +196,7 @@ function requirePal() {
 
 const routes = {
   // Liveness for the host's health check: must answer instantly, even mid-setup.
-  'GET /healthz': async () => ({ ok: true }),
+  'GET /healthz': async () => ({ ok: true, commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || undefined }),
 
   'GET /api/config': async () => {
     await palSettled();
@@ -428,26 +428,24 @@ process.on('unhandledRejection', (e) => console.error(`unhandled rejection: ${e 
 
 server.listen(PORT, async () => {
   console.log(`Coach Rook running at http://localhost:${PORT}`);
-  // Pre-analyze the bundled sample games so they open instantly in a demo.
-  if (process.env.SAMPLE_WARMUP !== '0') {
-    setTimeout(async () => {
-      for (const [file, side] of [['legal-trap', 'b'], ['opera-game', 'b']]) {
-        try {
-          await reviewGame(fs.readFileSync(path.join(PUBLIC, 'samples', `${file}.pgn`), 'utf8').trim(), side);
-        } catch (e) {
-          console.error(`  sample warmup failed (${file}): ${e.message}`);
-        }
-      }
-      console.log('  Sample games pre-analyzed');
-    }, 2000).unref();
-  }
   if (!process.env.TAVUS_API_KEY) {
     console.log('  (TAVUS_API_KEY not set: board + engine work, video coach disabled)');
-    return;
+  } else {
+    if (ACCESS_CODE) console.log('  Sessions require ACCESS_CODE');
+    else console.log('  WARNING: ACCESS_CODE is not set, so anyone who can reach this server can start video sessions on your Tavus account');
+    await ensurePal();
   }
-  if (ACCESS_CODE) console.log('  Sessions require ACCESS_CODE');
-  else console.log('  WARNING: ACCESS_CODE is not set, so anyone who can reach this server can start video sessions on your Tavus account');
-  await ensurePal();
+  // Pre-analyze the bundled sample games so they open instantly in a demo.
+  // After setup, so a small instance isn't doing both at once while it boots.
+  if (process.env.SAMPLE_WARMUP === '0') return;
+  for (const [file, side] of [['legal-trap', 'b'], ['opera-game', 'b']]) {
+    try {
+      await reviewGame(fs.readFileSync(path.join(PUBLIC, 'samples', `${file}.pgn`), 'utf8').trim(), side);
+    } catch (e) {
+      console.error(`  sample warmup failed (${file}): ${e.message}`);
+    }
+  }
+  console.log('  Sample games pre-analyzed');
 });
 
 // Render sends SIGTERM on every deploy: stop accepting, let in-flight requests finish.

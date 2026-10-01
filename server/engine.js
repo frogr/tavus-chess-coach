@@ -1,11 +1,14 @@
-// Thin promise wrapper around stockfish.js (asm/wasm build) for Node.
-// One engine instance, requests serialized through a queue.
+// Promise wrapper around Stockfish (stockfish.js, asm/wasm build). The engine
+// runs in a child process (engine-worker.js); requests are serialized through
+// a queue because one engine searches one position at a time.
 const path = require('path');
+const { fork } = require('child_process');
 const { Chess } = require('chess.js');
 const { httpError } = require('./errors');
-const createEngine = require(path.join(__dirname, '..', 'node_modules', 'stockfish', 'src', 'stockfish.js'));
 
-let sf = null;
+let child = null;
+let onLine = null; // receives engine output for the search in progress
+let onExit = null; // rejects the search in progress if the engine dies
 let queue = Promise.resolve();
 let waiting = 0;
 
@@ -13,30 +16,55 @@ let waiting = 0;
 // many waiting positions the server says "busy" instead of falling behind.
 const MAX_WAITING = Number(process.env.ENGINE_MAX_WAITING || 60);
 // How long past its time budget a search may run before the engine is
-// considered stuck and replaced.
-const WATCHDOG_GRACE = 15000;
+// considered stuck, killed, and replaced. Generous, because the first search
+// also pays for starting the engine on a slow instance.
+const WATCHDOG_GRACE = Number(process.env.ENGINE_WATCHDOG_GRACE || 20000);
 
 function engine() {
-  if (!sf) {
-    sf = createEngine();
-    sf.postMessage('uci');
-    sf.postMessage('isready');
-  }
-  return sf;
+  if (child) return child;
+  const proc = fork(path.join(__dirname, 'engine-worker.js'), [], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  proc.on('message', (line) => {
+    if (proc === child && onLine) onLine(String(line));
+  });
+  proc.on('exit', () => {
+    if (proc !== child) return;
+    child = null;
+    if (onExit) onExit();
+  });
+  proc.on('error', (e) => console.error(`engine process error: ${e.message}`));
+  // An idle engine must not keep the server (or a test run) from exiting.
+  proc.unref();
+  proc.channel.unref();
+  child = proc;
+  return proc;
+}
+
+function killEngine() {
+  const proc = child;
+  child = null;
+  if (proc) proc.kill('SIGKILL');
+  if (onExit) onExit(); // fail the search that was running on it
 }
 
 function runAnalysis(fen, depth, multipv, movetime, newGame) {
   return new Promise((resolve, reject) => {
     const e = engine();
+    e.channel.ref();
     const lines = {};
+    const finish = (settle, value) => {
+      clearTimeout(watchdog);
+      onLine = null;
+      onExit = null;
+      if (e.channel) e.channel.unref();
+      settle(value);
+    };
     const watchdog = setTimeout(() => {
-      // Drop the stuck instance; the next request starts a fresh one.
-      e.onmessage = null;
-      if (sf === e) sf = null;
-      reject(httpError(503, 'The chess engine timed out on that position. Try again.'));
+      onExit = null;
+      killEngine(); // the next request starts a fresh one
+      finish(reject, httpError(503, 'The chess engine timed out on that position. Try again.'));
     }, (movetime || 30000) + WATCHDOG_GRACE);
-    e.onmessage = (raw) => {
-      const line = typeof raw === 'string' ? raw : String(raw && raw.data);
+    onExit = () => finish(reject, httpError(503, 'The chess engine stopped unexpectedly. Try again.'));
+    onLine = (line) => {
       if (line.startsWith('info') && line.includes(' pv ') && line.includes(' multipv ')) {
         const mpv = Number(line.match(/ multipv (\d+)/)[1]);
         const d = Number(line.match(/ depth (\d+)/)[1]);
@@ -45,22 +73,21 @@ function runAnalysis(fen, depth, multipv, movetime, newGame) {
         const pv = line.split(' pv ')[1].trim().split(/\s+/);
         lines[mpv] = { depth: d, mate: mate ? Number(mate[1]) : null, cp: cp ? Number(cp[1]) : null, pv };
       } else if (line.startsWith('bestmove')) {
-        clearTimeout(watchdog);
         const sorted = Object.keys(lines).sort((a, b) => a - b).map((k) => lines[k]);
-        resolve({ bestmove: line.split(/\s+/)[1], lines: sorted });
+        finish(resolve, { bestmove: line.split(/\s+/)[1], lines: sorted });
       }
     };
-    e.postMessage(`setoption name MultiPV value ${multipv}`);
-    if (newGame) e.postMessage('ucinewgame');
-    e.postMessage(`position fen ${fen}`);
+    e.send(`setoption name MultiPV value ${multipv}`);
+    if (newGame) e.send('ucinewgame');
+    e.send(`position fen ${fen}`);
     // Stop at whichever comes first: the target depth or the time budget. On a
     // fast laptop depth wins; on a small cloud instance the time cap keeps
     // responses snappy.
-    e.postMessage(movetime ? `go depth ${depth} movetime ${movetime}` : `go depth ${depth}`);
+    e.send(movetime ? `go depth ${depth} movetime ${movetime}` : `go depth ${depth}`);
   });
 }
 
-// Serialize: stockfish.js is single-threaded and shares one onmessage.
+// Serialize: one engine, one search at a time.
 // multipv: how many candidate lines to return (1 is ~2x faster; game review uses 1).
 // movetime: ms cap per position (ENGINE_MOVETIME env overrides the default).
 // newGame: clear the hash first; game review keeps it, since consecutive
@@ -80,4 +107,4 @@ function analyze(fen, depth = 14, { multipv = 3, movetime = DEFAULT_MOVETIME, ne
   return job;
 }
 
-module.exports = { analyze };
+module.exports = { analyze, killEngine };

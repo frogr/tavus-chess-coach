@@ -110,7 +110,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 
 ```
 server/index.js        HTTP server: static files, /api/analyze, /api/session
-server/engine.js       Stockfish wrapper (serialized queue, MultiPV 3)
+server/engine.js       Stockfish wrapper: runs the engine in a child process (engine-worker.js), serialized queue, watchdog
 server/chessText.js    positions and engine lines -> plain English
 server/pal-config.js   system prompt, greeting, tool definitions (all PAL behavior in one file)
 server/puzzles.js      6 engine-verified teaching puzzles

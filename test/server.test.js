@@ -51,7 +51,7 @@ test('every file the page loads is served from this server', async () => {
 });
 
 test('healthz answers immediately; config reports the coach as off without a key', async () => {
-  assert.deepEqual(await (await app.get('/healthz')).json(), { ok: true });
+  assert.equal((await (await app.get('/healthz')).json()).ok, true);
   assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: false });
 });
 
