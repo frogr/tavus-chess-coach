@@ -6,7 +6,16 @@ const { Chess } = require('chess.js');
 const { analyze } = require('./engine');
 const { describeMove, scoreWords, uciLineToSan } = require('./chessText');
 
-const DEPTH = 14;
+// Two passes: a fast scan of every position, then a deep re-check of only the
+// positions around moves the scan flagged. Deep everywhere is ~4x slower on a
+// small server; fast everywhere produces false "blunders" from horizon effects.
+const FAST_DEPTH = Number(process.env.REVIEW_FAST_DEPTH || 10);
+const DEEP_DEPTH = Number(process.env.REVIEW_DEEP_DEPTH || 15);
+const FLAG_THRESHOLD = 8; // win% lost in the fast pass that earns a deep re-check
+// Per-position time caps (ms). Depth is reached well inside these on a laptop;
+// on a free-tier instance (~8x slower) the caps keep a full review near 20s.
+const FAST_MOVETIME = Number(process.env.REVIEW_FAST_MOVETIME || 250);
+const DEEP_MOVETIME = Number(process.env.REVIEW_DEEP_MOVETIME || 1200);
 const cache = new Map();
 
 // Engine line -> centipawns from White's point of view (mates mapped to +-10000).
@@ -56,6 +65,14 @@ async function loadPgn(input) {
   return text;
 }
 
+async function evalPosition(fen, depth, movetime, newGame = false) {
+  const c = new Chess(fen);
+  if (c.isCheckmate()) return { cp: c.turn() === 'w' ? -10000 : 10000, best: null, pv: [] };
+  if (c.isGameOver()) return { cp: 0, best: null, pv: [] };
+  const r = await analyze(fen, depth, { multipv: 1, movetime, newGame });
+  return { cp: whiteCp(r.lines[0], fen), best: r.bestmove, pv: r.lines[0].pv };
+}
+
 async function reviewGame(input, side) {
   const pgn = await loadPgn(input);
   const key = crypto.createHash('sha1').update(pgn + '|' + side).digest('hex');
@@ -71,22 +88,22 @@ async function reviewGame(input, side) {
   const history = game.history({ verbose: true });
   if (!history.length) throw Object.assign(new Error('That game has no moves.'), { status: 400 });
 
-  // Evaluate every position once: before move 1 through after the last move.
+  // Positions: before move 1 through after the last move.
   const fens = [history[0].before, ...history.map((m) => m.after)];
   const evals = [];
-  for (const fen of fens) {
-    const c = new Chess(fen);
-    if (c.isCheckmate()) {
-      evals.push({ cp: c.turn() === 'w' ? -10000 : 10000, best: null, pv: [] });
-      continue;
+  for (const [i, fen] of fens.entries()) evals.push(await evalPosition(fen, FAST_DEPTH, FAST_MOVETIME, i === 0));
+
+  // Deep re-check around every move the fast pass thinks lost something.
+  const recheck = new Set();
+  history.forEach((m, i) => {
+    const sign = m.color === 'w' ? 1 : -1;
+    const loss = winPct(sign * evals[i].cp) - winPct(sign * evals[i + 1].cp);
+    if (loss >= FLAG_THRESHOLD) {
+      recheck.add(i);
+      recheck.add(i + 1);
     }
-    if (c.isGameOver()) {
-      evals.push({ cp: 0, best: null, pv: [] });
-      continue;
-    }
-    const r = await analyze(fen, DEPTH, { multipv: 1 });
-    evals.push({ cp: whiteCp(r.lines[0], fen), best: r.bestmove, pv: r.lines[0].pv });
-  }
+  });
+  for (const i of recheck) evals[i] = await evalPosition(fens[i], DEEP_DEPTH, DEEP_MOVETIME);
 
   const moves = history.map((m, i) => {
     const mover = m.color;
@@ -175,12 +192,12 @@ async function judgeMove(fen, uci) {
   const mover = c.turn();
   const move = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
   const sign = mover === 'w' ? 1 : -1;
-  const before = await analyze(fen, 14, { multipv: 1 });
+  const before = await analyze(fen, 14, { multipv: 1, movetime: 1000 });
   const bestCp = whiteCp(before.lines[0], fen);
   let afterCp;
   if (c.isCheckmate()) afterCp = mover === 'w' ? 10000 : -10000;
   else if (c.isGameOver()) afterCp = 0;
-  else afterCp = whiteCp((await analyze(c.fen(), 14, { multipv: 1 })).lines[0], c.fen());
+  else afterCp = whiteCp((await analyze(c.fen(), 14, { multipv: 1, movetime: 1000 })).lines[0], c.fen());
   const loss = Math.max(0, winPct(sign * bestCp) - winPct(sign * afterCp));
   const bestSan = uciLineToSan(fen, [before.bestmove])[0];
   return {

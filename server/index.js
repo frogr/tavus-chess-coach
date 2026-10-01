@@ -82,7 +82,7 @@ const routes = {
   // the board when it reports a wrong move to the PAL.
   'POST /api/analyze': async ({ fen, candidate }) => {
     new Chess(fen); // throws on a bad FEN
-    const result = await analyze(fen, 14);
+    const result = await analyze(fen, 14, { movetime: 1200 });
     const summary = summarizeAnalysis(fen, result);
     let candidateText = '';
     if (candidate) {
@@ -97,7 +97,7 @@ const routes = {
         if (after.isCheckmate()) {
           candidateText = `${move.san} is checkmate.`;
         } else {
-          const r = await analyze(after.fen(), 12);
+          const r = await analyze(after.fen(), 12, { multipv: 1, movetime: 700 });
           const reply = summarizeAnalysis(after.fen(), r);
           candidateText =
             `If ${move.san}: evaluation becomes ${scoreWords(r.lines[0], after.fen())}, ` +
@@ -184,6 +184,17 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, async () => {
   console.log(`Coach Rook running at http://localhost:${PORT}`);
+  // Pre-analyze the bundled sample games so they open instantly in a demo.
+  setTimeout(async () => {
+    for (const [file, side] of [['legal-trap', 'b'], ['opera-game', 'b']]) {
+      try {
+        await reviewGame(fs.readFileSync(path.join(PUBLIC, 'samples', `${file}.pgn`), 'utf8').trim(), side);
+      } catch (e) {
+        console.error(`  sample warmup failed (${file}): ${e.message}`);
+      }
+    }
+    console.log('  Sample games pre-analyzed');
+  }, 2000);
   if (!process.env.TAVUS_API_KEY) {
     console.log('  (TAVUS_API_KEY not set: board + engine work, video coach disabled)');
     return;

@@ -207,19 +207,21 @@ async function playerMove(from, to) {
     render();
     setStatus(`${move.san} isn't it. Try again.`, 'bad');
     document.querySelector(`[data-square="${to}"]`)?.classList.add('wrong');
+    // Take the move back on a fixed timer, independent of the engine call, so
+    // a slow server never leaves the board locked.
     state.busy = true;
-    // Ask the engine what the move actually allows, so the coach's feedback is grounded.
-    let facts = '';
-    try {
-      const a = await api('/api/analyze', { fen: fenBefore, candidate: move.lan });
-      facts = ` Engine facts: ${a.text}`;
-    } catch {}
     setTimeout(() => {
       state.chess.undo();
       state.lastMove = null;
       state.busy = false;
       render();
     }, 900);
+    // Ask the engine what the move actually allows, so the coach's feedback is grounded.
+    let facts = '';
+    try {
+      const a = await api('/api/analyze', { fen: fenBefore, candidate: move.lan });
+      facts = ` Engine facts: ${a.text}`;
+    } catch {}
     sendRespond(
       `[board] ${who} played ${move.san} (${moveWords}). That is NOT the solution, so the board took it back and it is ${who}'s turn again.${facts} ` +
         `React briefly and encouragingly, say what the move allowed in plain words, and nudge without giving the answer away.`
@@ -319,7 +321,7 @@ async function loadReview(pgn, side) {
   $('reviewGo').textContent = 'Analyzing…';
   $('pTitle').textContent = 'Analyzing your game…';
   $('pLevel').textContent = 'Game review';
-  setStatus('Stockfish is checking every move', '');
+  setStatus('Stockfish is checking every move (up to ~30s on the free server)', '');
   try {
     const review = await api('/api/review', { pgn, side, player: state.player || $('player').value.trim() });
     state.review = review;

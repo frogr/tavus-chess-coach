@@ -15,7 +15,7 @@ function engine() {
   return sf;
 }
 
-function runAnalysis(fen, depth, multipv) {
+function runAnalysis(fen, depth, multipv, movetime, newGame) {
   return new Promise((resolve) => {
     const e = engine();
     const lines = {};
@@ -33,16 +33,23 @@ function runAnalysis(fen, depth, multipv) {
       }
     };
     e.postMessage(`setoption name MultiPV value ${multipv}`);
-    e.postMessage('ucinewgame');
+    if (newGame) e.postMessage('ucinewgame');
     e.postMessage(`position fen ${fen}`);
-    e.postMessage(`go depth ${depth}`);
+    // Stop at whichever comes first: the target depth or the time budget. On a
+    // fast laptop depth wins; on a small cloud instance the time cap keeps
+    // responses snappy.
+    e.postMessage(movetime ? `go depth ${depth} movetime ${movetime}` : `go depth ${depth}`);
   });
 }
 
 // Serialize: stockfish.js is single-threaded and shares one onmessage.
 // multipv: how many candidate lines to return (1 is ~2x faster; game review uses 1).
-function analyze(fen, depth = 14, { multipv = 3 } = {}) {
-  const job = queue.then(() => runAnalysis(fen, depth, multipv));
+// movetime: ms cap per position (ENGINE_MOVETIME env overrides the default).
+// newGame: clear the hash first; game review keeps it, since consecutive
+// positions share most of their search tree.
+const DEFAULT_MOVETIME = Number(process.env.ENGINE_MOVETIME || 1500);
+function analyze(fen, depth = 14, { multipv = 3, movetime = DEFAULT_MOVETIME, newGame = true } = {}) {
+  const job = queue.then(() => runAnalysis(fen, depth, multipv, movetime, newGame));
   queue = job.catch(() => {});
   return job;
 }
