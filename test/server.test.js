@@ -29,7 +29,7 @@ test('serves the app with security headers and revalidation', async () => {
   assert.match(res.headers.get('content-type'), /text\/html/);
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
-  assert.match(res.headers.get('content-security-policy'), /script-src 'self';/);
+  assert.match(res.headers.get('content-security-policy'), /script-src 'self' 'unsafe-eval' https:\/\/c\.daily\.co;/);
   assert.match(await res.text(), /Coach Rook/);
 
   const again = await app.get('/', { 'If-None-Match': res.headers.get('etag') });

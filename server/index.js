@@ -14,6 +14,7 @@ const { reviewGame, reviewContext, judgeMove } = require('./review');
 const { cleanName, participantTag, getMemory, recordSession } = require('./memory');
 const { httpError } = require('./errors');
 const { createLimiter } = require('./limits');
+const audit = require('./audit');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -21,6 +22,12 @@ const MODULES = path.join(__dirname, '..', 'node_modules');
 const CONFIG_PATH = process.env.TAVUS_CONFIG_PATH || path.join(__dirname, '..', '.tavus.json');
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
 const MAX_BODY = 100000; // bytes; a long PGN is a few KB
+// The admin dashboard is off unless a token is configured.
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+// Where Tavus can reach this server with conversation callbacks (transcript,
+// perception analysis, shutdown). Render provides RENDER_EXTERNAL_URL.
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+const WEBHOOK_TOKEN = audit.webhookToken(ADMIN_TOKEN || process.env.TAVUS_API_KEY || 'no-secret');
 
 // Browser libraries are served from the installed packages, so the versions
 // are pinned by package-lock.json and nothing loads from a CDN at runtime.
@@ -35,12 +42,15 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self'",
+    // Daily's call engine is fetched from Daily's CDN and evaluated by its SDK,
+    // which is why 'unsafe-eval' is here. Nothing in this app evaluates strings.
+    "script-src 'self' 'unsafe-eval' https://c.daily.co",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     "img-src 'self' data:",
-    "connect-src 'self' https://*.daily.co wss://*.daily.co",
-    'frame-src https://*.daily.co', // the Tavus conversation is a Daily room
+    "connect-src 'self' https://*.daily.co wss://*.daily.co https://*.pluot.blue wss://*.pluot.blue", // Daily signalling and media servers
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -56,6 +66,7 @@ const limits = {
   review: createLimiter({ windowMs: 60000, max: num('LIMIT_REVIEW_PER_MIN', 6) }),
   session: createLimiter({ windowMs: 600000, max: num('LIMIT_SESSIONS_PER_10MIN', 10) }),
   badCode: createLimiter({ windowMs: 600000, max: num('LIMIT_BAD_CODES_PER_10MIN', 10) }),
+  events: createLimiter({ windowMs: 60000, max: num('LIMIT_EVENT_POSTS_PER_MIN', 120) }),
 };
 
 function budget(limiter, ip, what) {
@@ -108,13 +119,13 @@ function send(res, status, body, extra = {}) {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req) {
+function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > limit) {
         req.removeAllListeners('data');
         req.resume();
         return reject(httpError(413, 'That request is too large.'));
@@ -186,6 +197,28 @@ function checkCode(code, ip) {
     limits.badCode.hit(ip);
     throw httpError(401, 'Wrong access code.');
   }
+}
+
+const secretMatches = (given, expected) =>
+  crypto.timingSafeEqual(crypto.createHash('sha256').update(String(given ?? '')).digest(), crypto.createHash('sha256').update(expected).digest());
+
+// Admin routes: a bearer token, with the same lockout as the access code.
+function requireAdmin(req, ip) {
+  if (!ADMIN_TOKEN) throw httpError(404, 'not found');
+  if (limits.badCode.blocked(ip)) throw httpError(429, 'Too many wrong tokens. Try again in a few minutes.');
+  const given = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!secretMatches(given, ADMIN_TOKEN)) {
+    limits.badCode.hit(ip);
+    throw httpError(401, 'Wrong admin token.');
+  }
+}
+
+// Ask Tavus for everything it has on a conversation (status, transcript,
+// perception analysis, shutdown reason) and keep it with the session.
+async function pullTavusRecord(id) {
+  const record = await tavus('GET', `/conversations/${id}?verbose=true`);
+  await audit.session(id, { data: { tavus: record, tavus_fetched_at: new Date().toISOString() } });
+  return record;
 }
 
 function requirePal() {
@@ -263,7 +296,7 @@ const routes = {
     return judgeMove(fen, move);
   },
 
-  'POST /api/session': async ({ player, key, code }, { ip }) => {
+  'POST /api/session': async ({ player, key, code }, { ip, clientId }) => {
     checkCode(code, ip);
     budget(limits.session, ip, 'sessions');
     await palSettled();
@@ -291,25 +324,31 @@ const routes = {
           : null,
     ].filter(Boolean).join(' ');
 
+    const greeting = returning
+      ? null
+      : name
+        ? `Hey ${name}, I'm Coach Rook. There's a puzzle on the board. Take a look and tell me what jumps out at you.`
+        : undefined;
     const convo = await tavus('POST', '/conversations', {
       pal_id: cfg.pal_id,
+      // Tavus posts conversation events (transcript, perception analysis, shutdown) here for the audit log.
+      ...(PUBLIC_URL ? { callback_url: `${PUBLIC_URL}/api/tavus/webhook/${WEBHOOK_TOKEN}` } : {}),
       conversation_name: `Chess coaching${name ? ` with ${name}` : ''}`,
       // Same tag -> same memory store, so Coach Rook remembers this student next time.
       ...(tag ? { participant_tags: [tag] } : {}),
       conversational_context: context || undefined,
       ...(returning
         ? { dynamic_greeting: true } // generated from the context above, so it can reference last time
-        : {
-            custom_greeting: name
-              ? `Hey ${name}, I'm Coach Rook. There's a puzzle on the board. Take a look and tell me what jumps out at you.`
-              : undefined,
-          }),
+        : { custom_greeting: greeting }),
       properties: {
         max_call_duration: 900,
         participant_left_timeout: 20,
         participant_absent_timeout: 120,
         enable_closed_captions: true,
       },
+    });
+    await audit.session(convo.conversation_id, {
+      data: { player: name, participant_tag: tag, pal_id: cfg.pal_id, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent },
     });
     return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning };
   },
@@ -320,16 +359,22 @@ const routes = {
   'POST /api/session/end': async ({ conversation_id, player, key, code, summary }, { ip }) => {
     checkCode(code, ip);
     const cfg = requirePal();
-    if (typeof conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(conversation_id)) {
-      await tavus('POST', `/conversations/${conversation_id}/end`).catch(() => {});
-    }
+    const valid = typeof conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(conversation_id);
+    if (valid) await tavus('POST', `/conversations/${conversation_id}/end`).catch(() => {});
     const name = cleanName(player);
-    if (!name || !summary) return { ok: true, saved: false };
-    const result = await recordSession(cfg.pal_id, name, key, summary).catch((e) => {
-      if (e.expose) throw e;
-      console.error(`session note not saved: ${e.message}`);
-      return { saved: false, reason: 'the memory service returned an error' };
-    });
+    let result = { saved: false };
+    if (name && summary) {
+      result = await recordSession(cfg.pal_id, name, key, summary).catch((e) => {
+        if (e.expose) throw e;
+        console.error(`session note not saved: ${e.message}`);
+        return { saved: false, reason: 'the memory service returned an error' };
+      });
+    }
+    if (valid) {
+      await audit.session(conversation_id, { ended_at: new Date().toISOString(), data: { summary: summary || null, note: result.note || null, note_saved: result.saved } });
+      // Tavus's own record of the call; the transcript arrives later by webhook.
+      pullTavusRecord(conversation_id).catch(() => {});
+    }
     return { ok: true, ...result };
   },
 
@@ -341,6 +386,96 @@ const routes = {
     return getMemory(cfg.pal_id, cleanName(player), key);
   },
 };
+
+// ---------------------------------------------------------------- audit + admin
+// The browser reports what happened on the board and in the call.
+routes['POST /api/events'] = async ({ client, events }, { ip }) => {
+  budget(limits.events, ip, 'event reports');
+  const clientId = typeof client === 'string' && /^[a-z0-9-]{8,64}$/i.test(client) ? client : null;
+  if (!clientId || !Array.isArray(events)) throw httpError(400, 'Malformed event report.');
+  for (const e of events.slice(0, 100)) {
+    if (!e || typeof e.kind !== 'string') continue;
+    const t = Number(e.t);
+    audit.record({
+      source: 'client',
+      kind: e.kind.replace(/[^\w.:→← -]/g, '').slice(0, 100) || 'unknown',
+      ts: Number.isFinite(t) && Math.abs(Date.now() - t) < 3600000 ? new Date(t) : new Date(),
+      client_id: clientId,
+      conversation_id: typeof e.conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(e.conversation_id) ? e.conversation_id : null,
+      ip,
+      data: e.data,
+    });
+  }
+  return { ok: true };
+};
+
+routes['GET /api/admin/overview'] = async (_b, { req, ip }) => {
+  requireAdmin(req, ip);
+  return { stats: await audit.stats(), sessions: await audit.listSessions({ limit: 100 }), visits: await audit.listVisits({ limit: 100 }) };
+};
+
+routes['GET /api/admin/session'] = async (_b, { req, ip, query }) => {
+  requireAdmin(req, ip);
+  const id = String(query.get('id') || '');
+  if (!/^[a-z0-9]{4,64}$/i.test(id)) throw httpError(400, 'Bad conversation id.');
+  let refreshError = null;
+  if (query.get('refresh') === '1' && process.env.TAVUS_API_KEY) await pullTavusRecord(id).catch((e) => (refreshError = e.message));
+  const session = await audit.getSession(id);
+  if (!session) throw httpError(404, 'No such session in the audit log.');
+  return { session, refreshError };
+};
+
+routes['GET /api/admin/events'] = async (_b, { req, ip, query }) => {
+  requireAdmin(req, ip);
+  const pick = (name, max = 100) => (query.get(name) || '').slice(0, max) || undefined;
+  return {
+    events: await audit.listEvents({
+      kind: pick('kind'),
+      source: pick('source', 20),
+      client: pick('client', 64),
+      conversation: pick('conversation', 64),
+      q: pick('q', 200),
+      before: Number(query.get('before')) || undefined,
+      limit: Math.min(Number(query.get('limit')) || 200, 1000),
+    }),
+  };
+};
+
+// Tavus conversation callbacks. The path carries a token only Tavus was given.
+async function tavusWebhook(token, payload, ip) {
+  if (!secretMatches(token, WEBHOOK_TOKEN)) throw httpError(404, 'not found');
+  const id = typeof payload.conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(payload.conversation_id) ? payload.conversation_id : null;
+  const type = String(payload.event_type || payload.message_type || 'unknown').slice(0, 80);
+  audit.record({ source: 'tavus', kind: `tavus.webhook:${type}`, conversation_id: id, ip, data: payload, whole: true });
+  if (id && type === 'system.shutdown') await audit.session(id, { ended_at: new Date().toISOString(), data: { shutdown: payload.properties || {} } });
+  if (id && type === 'application.transcription_ready') await audit.session(id, { data: { transcript: payload.properties?.transcript || payload.properties || null } });
+  if (id && type === 'application.perception_analysis') await audit.session(id, { data: { perception_analysis: payload.properties?.analysis || payload.properties || null } });
+  return { ok: true };
+}
+
+// What gets written to the audit log for one API request.
+const UNLOGGED = new Set(['/healthz', '/api/events']); // liveness pings and the event reports themselves
+function logRequest(req, pathname, ctx, body, status, started, result, error) {
+  if (UNLOGGED.has(pathname)) return;
+  const admin = pathname.startsWith('/api/admin/');
+  const convo = [body?.conversation_id, result?.conversation_id].find((v) => typeof v === 'string' && /^[a-z0-9]{4,64}$/i.test(v));
+  audit.record({
+    kind: status >= 400 ? 'http.error' : admin ? 'http.admin' : 'http',
+    client_id: ctx.clientId,
+    conversation_id: convo || null,
+    ip: ctx.ip,
+    data: {
+      method: req.method,
+      path: pathname.startsWith('/api/tavus/webhook/') ? '/api/tavus/webhook/[token]' : pathname,
+      status,
+      ms: Date.now() - started,
+      request: req.method === 'POST' ? body : undefined,
+      response: admin ? undefined : result, // the dashboard reading the log is not itself worth storing
+      error: error || undefined,
+      agent: String(req.headers['user-agent'] || '').slice(0, 200) || undefined,
+    },
+  });
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -362,6 +497,7 @@ function serveStatic(req, res, pathname) {
     return send(res, 400, { error: 'bad request' });
   }
   if (rel.includes('\0')) return send(res, 400, { error: 'bad request' });
+  if (rel === '/admin') rel = '/admin.html';
   const file = VENDOR[rel] || path.join(PUBLIC, rel === '/' ? 'index.html' : rel);
   if (!VENDOR[rel] && !file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'forbidden' });
   fs.stat(file, (err, stat) => {
@@ -387,31 +523,40 @@ function serveStatic(req, res, pathname) {
 }
 
 async function handle(req, res) {
-  let pathname;
+  let url;
   try {
-    pathname = new URL(req.url, 'http://localhost').pathname;
+    url = new URL(req.url, 'http://localhost');
   } catch {
     return send(res, 400, { error: 'bad request' });
   }
-  const handler = routes[`${req.method} ${pathname}`];
+  const pathname = url.pathname;
+  const webhook = req.method === 'POST' && pathname.startsWith('/api/tavus/webhook/');
+  const handler = webhook ? (body, ctx) => tavusWebhook(pathname.split('/')[4], body, ctx.ip) : routes[`${req.method} ${pathname}`];
   if (!handler) {
     if (pathname.startsWith('/api/')) return send(res, 404, { error: 'not found' });
     return serveStatic(req, res, pathname);
   }
+  const started = Date.now();
+  const clientId = /^[a-z0-9-]{8,64}$/i.test(req.headers['x-client-id'] || '') ? req.headers['x-client-id'] : null;
+  const ctx = { ip: clientIp(req), clientId, query: url.searchParams, req };
+  let body = {};
   try {
-    const ip = clientIp(req);
-    budget(limits.api, ip, 'requests');
-    const body = req.method === 'POST' ? await readBody(req) : {};
-    send(res, 200, await handler(body, { ip }));
+    budget(limits.api, ctx.ip, 'requests');
+    if (req.method === 'POST') body = await readBody(req, webhook ? 4000000 : MAX_BODY); // transcripts are long
+    const result = await handler(body, ctx);
+    send(res, 200, result);
+    logRequest(req, pathname, ctx, body, 200, started, result);
   } catch (e) {
-    if (e.expose) return send(res, e.status, { error: e.message }, e.status === 413 ? { Connection: 'close' } : {});
+    if (e.expose) {
+      send(res, e.status, { error: e.message }, e.status === 413 ? { Connection: 'close' } : {});
+      return logRequest(req, pathname, ctx, body, e.status, started, null, e.message);
+    }
     // Anything unexpected: full detail in the server log, a short message to the browser.
     console.error(`${req.method} ${pathname} failed: ${e.stack || e.message}`);
-    if (e.tavus) {
-      const detail = typeof e.data?.message === 'string' ? ` Tavus said: ${e.data.message.slice(0, 200)}` : '';
-      return send(res, 502, { error: `The video service (Tavus) returned an error.${detail}` });
-    }
-    send(res, 500, { error: 'Something went wrong on the server.' });
+    const status = e.tavus ? 502 : 500;
+    const detail = e.tavus && typeof e.data?.message === 'string' ? ` Tavus said: ${e.data.message.slice(0, 200)}` : '';
+    send(res, status, { error: e.tavus ? `The video service (Tavus) returned an error.${detail}` : 'Something went wrong on the server.' });
+    logRequest(req, pathname, ctx, body, status, started, null, e.stack || e.message);
   }
 }
 
@@ -424,10 +569,16 @@ const server = http.createServer((req, res) => {
 });
 
 // A stray rejection should be logged, not take the whole service down.
-process.on('unhandledRejection', (e) => console.error(`unhandled rejection: ${e && (e.stack || e.message || e)}`));
+process.on('unhandledRejection', (e) => {
+  console.error(`unhandled rejection: ${e && (e.stack || e.message || e)}`);
+  audit.record({ kind: 'server.error', data: { error: String(e && (e.stack || e.message || e)) } });
+});
 
 server.listen(PORT, async () => {
   console.log(`Coach Rook running at http://localhost:${PORT}`);
+  await audit.init();
+  audit.record({ kind: 'server.boot', data: { commit: process.env.RENDER_GIT_COMMIT || null, node: process.version, admin: Boolean(ADMIN_TOKEN), webhook: Boolean(PUBLIC_URL) } });
+  if (ADMIN_TOKEN) console.log('  Admin dashboard at /admin');
   if (!process.env.TAVUS_API_KEY) {
     console.log('  (TAVUS_API_KEY not set: board + engine work, video coach disabled)');
   } else {
@@ -451,7 +602,8 @@ server.listen(PORT, async () => {
 // Render sends SIGTERM on every deploy: stop accepting, let in-flight requests finish.
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
-    server.close(() => process.exit(0));
+    // Finish in-flight requests and write out any queued audit events first.
+    server.close(() => audit.close().finally(() => process.exit(0)));
     setTimeout(() => process.exit(0), 5000).unref();
   });
 }

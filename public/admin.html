@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Coach Rook · audit log</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body class="admin">
+  <header class="topbar">
+    <div class="brand"><span class="logo">♜</span> Coach Rook <span class="muted">audit log</span></div>
+    <nav id="nav" class="tabs" hidden>
+      <button data-view="sessions" class="active">Coach sessions</button>
+      <button data-view="visits">Visits</button>
+      <button data-view="events">All events</button>
+    </nav>
+    <div class="topbar-actions"><span id="storeInfo" class="muted small"></span><button id="signOut" class="quiet" hidden>Sign out</button></div>
+  </header>
+
+  <main id="main" class="admin-main">
+    <form id="login" class="login">
+      <h1>Audit log</h1>
+      <p class="muted">Every API request, every call to Tavus, and everything that happened on the board and in the call.</p>
+      <label>Admin token <input id="token" type="password" autocomplete="current-password" /></label>
+      <button class="primary">Open</button>
+      <p id="loginError" class="error" role="alert"></p>
+    </form>
+    <section id="view" hidden></section>
+  </main>
+
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>

@@ -139,6 +139,10 @@ async function startFakeTavus(state = {}) {
         db.conversations.push(convo);
         return reply(200, convo);
       }
+      if ((m = route.match(/^GET \/conversations\/(\w+)$/))) {
+        const convo = db.conversations.find((c) => c.conversation_id === m[1]);
+        return convo ? reply(200, { conversation_id: convo.conversation_id, status: convo.ended ? 'ended' : 'active' }) : reply(404, {});
+      }
       if ((m = route.match(/^POST \/conversations\/(\w+)\/end$/))) {
         const convo = db.conversations.find((c) => c.conversation_id === m[1]);
         if (convo) convo.ended = true;

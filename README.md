@@ -21,7 +21,19 @@ Render reads `render.yaml`, asks for `TAVUS_API_KEY` and an `ACCESS_CODE`, and b
 
 Deploys are gated on tests: `render.yaml` sets `autoDeployTrigger: checksPass`, so once the repo is connected to Render through the GitHub integration, a push to `main` goes live only after the CI workflow passes. Until it is connected, deploy by hand with `render deploys create <service-id>`.
 
-Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes.
+Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes. `?nomedia` joins a call without asking for the microphone or camera (watch-only, handy for checking the video panel).
+
+## Audit log and admin dashboard
+
+When the coach says something wrong, you need to see exactly what it was told. Everything is recorded:
+
+- **Every API request** to this server: method, path, status, timing, request and response.
+- **Every call to Tavus**, with the request and response, and **every Tavus callback** (transcript, perception analysis, shutdown reason). After a call ends the server also pulls Tavus's own verbose record of the conversation.
+- **Everything the browser saw**: each move, puzzle load, game review and try; every message the board sent to the coach; every interaction event that came back (utterances as they stream, tool calls and results, speaking and thinking state); call lifecycle and errors.
+
+Events are tied together by conversation ID and by a per-page-load visit ID, so a session reads as one timeline. Secrets (the access code, notebook keys, tokens) are redacted before anything is written.
+
+Set `DATABASE_URL` (Postgres; a free Neon database is plenty) so the log survives restarts, and `ADMIN_TOKEN` to turn on the dashboard at `/admin`: coach sessions with transcript and timeline, visits without a session, and a searchable stream of all events. Events are kept for `AUDIT_RETENTION_DAYS` (default 90). Without `DATABASE_URL` events are held in memory only. Video recordings are not captured: Tavus only records to an S3 bucket you provide.
 
 ## Memory: the coach remembers you
 
@@ -86,8 +98,9 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **Setup is code, not clicks.** `npm run setup` is idempotent: tools are matched by name and patched, the PAL is found by ID or name and patched in place. A customer can re-run it after every prompt change and diff the config in git, and a fresh deploy configures itself on boot.
 - **Access code on public deploys.** The API key never leaves the server, but anyone with the URL could still start sessions on your account, so `ACCESS_CODE` gates the video coach.
 - **Public endpoints are bounded.** The board and engine are open to anyone with the URL, so every engine route is rate limited per client, the engine queue and game length are capped, and wrong access codes lock that client out after ten tries. Inputs are validated (a bad FEN or PGN is a 400, never a crash), and what the browser reports at session end is filtered down to known themes and real chess moves before it is written into a student's memory.
-- **Nothing loads from a CDN.** chess.js and the Daily SDK are served from the installed npm packages and the piece images live in the repo, so versions are pinned by `package-lock.json` and the page runs under a strict Content-Security-Policy.
-- **"Under the hood" panel.** Every tool call, tool result, and board event is shown live. It's for the demo, but it's also the debugging view I'd want when a customer says "the PAL did something weird."
+- **Dependencies are pinned and self-hosted.** chess.js and the Daily SDK are served from the installed npm packages and the piece images live in the repo. The one exception is Daily's call engine, which its SDK fetches from Daily's CDN and evaluates; the Content-Security-Policy allows exactly that (`'unsafe-eval'` plus `c.daily.co`) and nothing else from outside.
+- **A custom call UI, not Daily's prebuilt one.** The call runs on a Daily call object and the page renders the coach's video itself, so the panel shows the coach, captions and three controls instead of a meeting app's chrome.
+- **"Under the hood" drawer.** Every tool call, tool result, and board event, live, behind a button in the top bar. The audit log (above) is the durable version of the same thing.
 
 ## How game review works
 
@@ -120,7 +133,11 @@ server/setup.js        idempotent Tavus setup (tools, PAL, attach); also runs on
 server/memory.js       student memory: session notes, sanitizing what the browser reports
 server/limits.js       per-client rate limits
 render.yaml            one-click Render deploy
-public/app.js          board, tool handlers, interaction protocol, Daily embed
+server/audit.js        audit log: Postgres or in-memory store, redaction, batching
+public/app.js          puzzle and review flow, tool handlers, interaction protocol, the call
+public/board.js        board renderer: sliding pieces, drag and click moves, arrows, badges
+public/sounds.js       synthesized move sounds (WebAudio, no audio files)
+public/admin.*         the audit dashboard
 public/puzzle-logic.mjs  which puzzle a "next / harder / theme" request loads
 public/pieces/         piece images (cburnett set, see LICENSE.txt there)
 test/                  node:test suites; test/helpers.js has the fake Tavus API

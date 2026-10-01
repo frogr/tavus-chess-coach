@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Coach Rook · chess puzzles with a face</title>
+  <title>Coach Rook</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
@@ -12,115 +12,145 @@
 </head>
 <body data-mode="puzzle">
   <header class="topbar">
-    <div class="brand"><span class="logo">♜</span> Coach Rook <span class="tag">Tavus CVI demo</span></div>
-    <div class="session">
-      <input id="player" placeholder="Your name (for memory)" maxlength="40" />
-      <input id="code" placeholder="Access code" maxlength="60" hidden />
-      <button id="start" class="primary">Start coaching session</button>
-      <button id="stop" class="ghost" hidden>End session</button>
+    <div class="brand"><span class="logo">♜</span> Coach Rook</div>
+    <div class="topbar-actions">
+      <button id="soundBtn" class="quiet" aria-pressed="true">Sound</button>
+      <button id="hoodBtn" class="quiet" aria-expanded="false" aria-controls="hood">Under the hood</button>
     </div>
   </header>
 
   <main class="layout">
-    <section class="coach">
-      <div id="video" class="video">
-        <div class="video-empty" id="videoEmpty">
-          <div class="big">♞</div>
-          <p>Coach Rook joins here on a live video call.</p>
-          <p class="muted" id="setupHint">Enter your name and start a session. You can already play the puzzle on the right.</p>
+    <section class="coach-col">
+      <!-- One panel, three states: lobby (before a call), connecting, live. -->
+      <div id="stage" class="stage" data-state="lobby">
+        <form id="lobby" class="lobby">
+          <div class="lobby-mark">♞</div>
+          <h2>Meet your coach</h2>
+          <p class="muted" id="setupHint">Coach Rook joins on video, watches your moves and talks you through them. The board works without a call too.</p>
+          <label>Your name
+            <input id="player" maxlength="40" autocomplete="given-name" placeholder="So Coach Rook remembers you" />
+          </label>
+          <label id="codeField" hidden>Access code
+            <input id="code" maxlength="60" autocomplete="off" />
+          </label>
+          <button id="start" class="primary">Start session</button>
+          <p id="lobbyError" class="error" role="alert"></p>
+        </form>
+
+        <div class="connecting">
+          <div class="spinner" aria-hidden="true"></div>
+          <p>Calling Coach Rook…</p>
+          <p class="muted small">If your browser asks, allow the microphone and camera.</p>
+          <button id="cancelCall" class="quiet small">Cancel</button>
+        </div>
+
+        <div class="live">
+          <video id="coachVideo" class="coach-video" autoplay playsinline></video>
+          <audio id="coachAudio" autoplay></audio>
+          <video id="selfVideo" class="self-video off" autoplay playsinline muted></video>
+          <p id="stageNote" class="stage-note" role="status"></p>
+          <p id="caption" class="caption" aria-live="polite"></p>
         </div>
       </div>
-      <div class="caption" id="caption"></div>
+
+      <div id="callBar" class="call-bar" hidden>
+        <button id="micBtn" class="quiet" aria-pressed="true">Mic</button>
+        <button id="camBtn" class="quiet" aria-pressed="true">Camera</button>
+        <button id="stop" class="danger">End session</button>
+      </div>
+
+      <section id="notebook" class="notebook" hidden>
+        <header>
+          <h2>Coach's notebook</h2>
+          <span id="nbName" class="muted"></span>
+        </header>
+        <ul id="nbNotes"></ul>
+        <details class="nb-key">
+          <summary>Use this notebook on another device</summary>
+          <p>Enter the same name there, with this key:</p>
+          <div class="nb-key-row">
+            <code id="nbKey"></code>
+            <button id="nbKeyCopy" class="quiet small">Copy</button>
+          </div>
+          <form id="nbKeyForm">
+            <input id="nbKeyInput" placeholder="Or paste a key from another device" maxlength="80" autocomplete="off" aria-label="Notebook key from another device" />
+            <button class="quiet small">Use key</button>
+            <span id="nbKeyError" class="error" role="alert"></span>
+          </form>
+        </details>
+      </section>
     </section>
 
-    <section class="boardcol">
-      <nav class="tabs">
+    <section class="board-col">
+      <nav class="tabs" aria-label="Mode">
         <button data-tab="puzzle" class="active">Puzzles</button>
         <button data-tab="review">Review a game</button>
       </nav>
-      <div class="puzzle-head">
+
+      <div class="board-head">
         <div>
           <div class="eyebrow" id="pLevel">Puzzle</div>
           <h1 id="pTitle">Loading…</h1>
         </div>
         <div class="status" id="status" role="status" aria-live="polite"></div>
       </div>
-      <div class="board-wrap">
-        <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to."></div>
-        <div id="promo" class="promo" role="group" aria-label="Choose a piece to promote to" hidden></div>
-        <svg id="arrows" class="arrows" viewBox="0 0 8 8" preserveAspectRatio="none">
-          <defs>
-            <marker id="head" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto">
-              <path d="M0,0 L3,1.5 L0,3 z" fill="var(--arrow)" />
-            </marker>
-          </defs>
-        </svg>
+
+      <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to.">
+        <div class="promo" role="group" aria-label="Choose a piece to promote to"><div></div></div>
       </div>
+
       <div class="controls puzzle-only">
-        <button id="retry" class="ghost">Reset puzzle</button>
-        <button id="next" class="ghost">Next puzzle →</button>
+        <button id="retry" class="quiet">Reset</button>
+        <button id="next" class="quiet">Next puzzle</button>
         <span class="moves" id="moves"></span>
       </div>
 
       <div class="review-only review">
         <div id="reviewResult" hidden>
           <div class="nav">
-            <button id="navStart" class="ghost" title="Start">⏮</button>
-            <button id="navPrev" class="ghost" title="Previous (←)">◀</button>
-            <button id="navNext" class="ghost" title="Next (→)">▶</button>
-            <button id="navEnd" class="ghost" title="End">⏭</button>
-            <span class="muted small">Key moments:</span>
+            <button id="navStart" class="quiet small" aria-label="Start of game">⏮</button>
+            <button id="navPrev" class="quiet small" aria-label="Previous move">◀</button>
+            <button id="navNext" class="quiet small" aria-label="Next move">▶</button>
+            <button id="navEnd" class="quiet small" aria-label="End of game">⏭</button>
             <span id="moments" class="moments"></span>
           </div>
           <div id="gameMoves" class="game-moves"></div>
         </div>
         <details id="reviewInput" open>
           <summary>Load a game</summary>
-          <textarea id="pgn" rows="5" placeholder="Paste a PGN, or a Lichess game link (lichess.org/abcd1234)"></textarea>
+          <textarea id="pgn" rows="4" placeholder="Paste a PGN, or a Lichess game link"></textarea>
           <div class="controls">
-            <label class="small muted">I played
+            <label class="inline">I played
               <select id="side"><option value="w">White</option><option value="b">Black</option></select>
             </label>
-            <button id="reviewGo" class="primary">Analyze game</button>
-            <span class="muted small">or try:</span>
-            <button class="ghost small-btn" data-sample="legal-trap" data-side="b">A trap (as Black)</button>
-            <button class="ghost small-btn" data-sample="opera-game" data-side="b">Morphy's Opera Game (as Black)</button>
+            <button id="reviewGo" class="primary">Analyze</button>
+            <span class="muted small">or try a sample:</span>
+            <button class="quiet small" data-sample="legal-trap" data-side="b">A trap</button>
+            <button class="quiet small" data-sample="opera-game" data-side="b">Morphy's Opera Game</button>
           </div>
         </details>
       </div>
     </section>
-
-    <aside class="feed">
-      <div id="notebook" class="notebook" hidden>
-        <h2>Coach's notebook · <span id="nbName"></span></h2>
-        <p class="muted small">What Coach Rook remembers about you (your Tavus memory store). Updated after every session.</p>
-        <ul id="nbNotes"></ul>
-        <div class="nb-key muted small">
-          <p>This notebook belongs to this browser. To open it on another device, enter the same name there and this key:</p>
-          <code id="nbKey"></code>
-          <button id="nbKeyCopy" class="ghost small-btn">Copy</button>
-          <button id="nbKeyChange" class="ghost small-btn">Use a key from another device</button>
-          <form id="nbKeyForm" hidden>
-            <input id="nbKeyInput" placeholder="Paste your notebook key" maxlength="80" autocomplete="off" aria-label="Notebook key from another device" />
-            <button class="ghost small-btn">Use this key</button>
-            <span id="nbKeyError" role="alert"></span>
-          </form>
-        </div>
-      </div>
-      <h2>Under the hood</h2>
-      <p class="muted small">Every tool call the PAL makes and every board event sent to it, live.</p>
-      <div id="sim" class="sim" hidden>
-        <div class="small muted">Simulator (no Tavus minutes used):</div>
-        <button data-sim="analyze">analyze</button>
-        <button data-sim="hint">show_on_board</button>
-        <button data-sim="next">load next</button>
-        <button data-sim="solution">play solution</button>
-        <button data-sim="moment">goto moment 1</button>
-        <button data-sim="line">engine line</button>
-      </div>
-      <ol id="log" class="log"></ol>
-    </aside>
   </main>
+
+  <!-- Developer view: every tool call and board event, live. Closed by default. -->
+  <aside id="hood" class="hood" hidden aria-label="Under the hood">
+    <header>
+      <h2>Under the hood</h2>
+      <button id="hoodClose" class="quiet small">Close</button>
+    </header>
+    <p class="muted small">Every tool call the coach makes and every board event sent to it.</p>
+    <div id="sim" class="sim" hidden>
+      <div class="small muted">Simulate a tool call (no video minutes used)</div>
+      <button class="quiet small" data-sim="analyze">analyze</button>
+      <button class="quiet small" data-sim="hint">show on board</button>
+      <button class="quiet small" data-sim="next">load next</button>
+      <button class="quiet small" data-sim="solution">play solution</button>
+      <button class="quiet small" data-sim="moment">go to moment 1</button>
+      <button class="quiet small" data-sim="line">engine line</button>
+    </div>
+    <ol id="log" class="log"></ol>
+  </aside>
 
   <script type="module" src="/app.js"></script>
 </body>

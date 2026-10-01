@@ -14,3 +14,7 @@ services:
         sync: false # entered in the Render dashboard, never committed
       - key: ACCESS_CODE
         sync: false # visitors need this to start a video session (protects your minutes)
+      - key: DATABASE_URL
+        sync: false # Postgres for the audit log (e.g. a free Neon database); events are lost on restart without it
+      - key: ADMIN_TOKEN
+        sync: false # long random value; turns on the audit dashboard at /admin

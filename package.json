@@ -16,6 +16,7 @@
   "dependencies": {
     "@daily-co/daily-js": "0.92.2",
     "chess.js": "^1.4.0",
+    "pg": "8.23.1",
     "stockfish": "^10.0.2"
   }
 }

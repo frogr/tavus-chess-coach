@@ -6,11 +6,14 @@
 // npm packages (see VENDOR in server/index.js), so nothing loads from a CDN.
 import { Chess } from '/vendor/chess.js';
 import { pickPuzzle } from '/puzzle-logic.mjs';
+import { Board } from '/board.js';
+import * as sounds from '/sounds.js';
 
 const $ = (id) => document.getElementById(id);
-const PIECE_URL = (color, type) => `/pieces/${color}${type.toUpperCase()}.svg`;
-const FILES = 'abcdefgh';
 const SIM = new URLSearchParams(location.search).has('sim');
+// ?nomedia joins a call without asking for the microphone or camera (watch-only; used for testing).
+const NO_MEDIA = new URLSearchParams(location.search).has('nomedia');
+const JOIN_TIMEOUT_MS = 45000;
 
 const state = {
   puzzles: [],
@@ -55,17 +58,42 @@ const puzzle = () => state.puzzles[state.index];
 // puzzles mid-animation can never play stale moves or leave the board locked.
 let generation = 0;
 function newPosition() {
-  closePromotion();
   state.busy = false;
+  state.snap = true; // next render places pieces without sliding them across the board
   return ++generation;
 }
 
 // ---------------------------------------------------------------- API helpers
 async function api(path, body) {
-  const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const headers = { 'X-Client-Id': CLIENT_ID };
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, body ? { method: 'POST', headers, body: JSON.stringify(body) } : { headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+
+// ---------------------------------------------------------------- audit trail
+// Everything that happens here (moves, puzzle loads, tool calls, every message
+// to and from the coach, call lifecycle) is reported to the server's audit
+// log, so a session can be replayed later when the coach misbehaves.
+const CLIENT_ID = crypto.randomUUID(); // one per page load
+const auditQueue = [];
+let auditTimer = null;
+
+function audit(kind, data) {
+  auditQueue.push({ t: Date.now(), kind, conversation_id: state.conversationId || undefined, data });
+  if (auditQueue.length >= 40) flushAudit();
+  else auditTimer ||= setTimeout(flushAudit, 1500);
+}
+
+function flushAudit(beacon = false) {
+  clearTimeout(auditTimer);
+  auditTimer = null;
+  if (!auditQueue.length) return;
+  const body = JSON.stringify({ client: CLIENT_ID, events: auditQueue.splice(0) });
+  if (beacon && navigator.sendBeacon) navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }));
+  else fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- notebook key
@@ -101,6 +129,7 @@ function useNotebookKey(text) {
 
 // ---------------------------------------------------------------- feed log
 function log(kind, cls, text, detail) {
+  audit(`feed:${kind}`, { text, detail });
   const li = document.createElement('li');
   li.className = cls;
   li.innerHTML = `<span class="kind"></span><span class="text"></span>`;
@@ -115,77 +144,35 @@ function log(kind, cls, text, detail) {
 }
 
 // ---------------------------------------------------------------- board render
+const canMove = () => !state.busy && (state.mode === 'review' ? state.trying : !state.solved);
+const board = new Board($('board'), {
+  canMove,
+  onMove: (from, to, promotion) => (state.mode === 'review' ? reviewTry(from, to, promotion || 'q') : playerMove(from, to, promotion || 'q')),
+});
+let shownArrows = '';
+
+// Push the app state onto the board. Pieces slide when the position changes by
+// a move, and snap when a different position is loaded.
 function render() {
-  const board = $('board');
-  const focused = board.contains(document.activeElement) ? document.activeElement.dataset.square : null;
-  board.innerHTML = '';
-  const legalTargets = state.selected
-    ? state.chess.moves({ square: state.selected, verbose: true }).map((m) => m.to)
-    : [];
-  const grid = state.chess.board(); // rank 8 first
-  const flip = state.orientation === 'b';
-  for (let vr = 0; vr < 8; vr++) {
-    for (let vf = 0; vf < 8; vf++) {
-      // vr/vf are on-screen row/col; r/f are board row (8th rank = 0) and file.
-      const r = flip ? 7 - vr : vr;
-      const f = flip ? 7 - vf : vf;
-      const square = FILES[f] + (8 - r);
-      const el = document.createElement('div');
-      el.className = `sq ${(r + f) % 2 === 0 ? 'l' : 'd'}`;
-      el.dataset.square = square;
-      el.tabIndex = 0;
-      el.setAttribute('role', 'button');
-      if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) el.classList.add('last');
-      if (state.selected === square) el.classList.add('sel');
-      if (state.highlights.includes(square)) el.classList.add('hl');
-      if (legalTargets.includes(square)) el.classList.add('target');
-      const p = grid[r][f];
-      if (p) {
-        const pc = document.createElement('div');
-        pc.className = 'piece';
-        pc.style.backgroundImage = `url(${PIECE_URL(p.color, p.type)})`;
-        pc.title = `${sideName(p.color)} ${NAMES[p.type]}`;
-        el.appendChild(pc);
-      }
-      el.setAttribute('aria-label', p ? `${square}, ${sideName(p.color)} ${NAMES[p.type]}` : `${square}, empty`);
-      if (vf === 0) el.insertAdjacentHTML('beforeend', `<span class="coord r">${8 - r}</span>`);
-      if (vr === 7) el.insertAdjacentHTML('beforeend', `<span class="coord f">${FILES[f]}</span>`);
-      el.addEventListener('click', () => onSquare(square));
-      el.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        onSquare(square);
-      });
-      board.appendChild(el);
-    }
-  }
-  if (focused) board.querySelector(`[data-square="${focused}"]`)?.focus();
-  renderArrows();
+  board.setOrientation(state.orientation);
+  board.setPosition(state.chess.fen(), { lastMove: state.lastMove, animate: !state.snap });
+  state.snap = false;
+  board.setHighlights(state.highlights);
+  const arrows = JSON.stringify(state.arrows);
+  board.setArrows(state.arrows.map(([from, to]) => ({ from, to })), arrows !== shownArrows);
+  shownArrows = arrows;
+  board.setBadge(state.badge?.square, state.badge?.cls);
+  board.refresh();
   $('moves').textContent = state.mode === 'puzzle' ? state.sanLog.join(' ') : '';
 }
 
-function sqCenter(sq) {
-  const x = FILES.indexOf(sq[0]) + 0.5;
-  const y = 8 - Number(sq[1]) + 0.5;
-  return state.orientation === 'b' ? { x: 8 - x, y: 8 - y } : { x, y };
-}
-
-function renderArrows() {
-  const svg = $('arrows');
-  svg.querySelectorAll('line').forEach((l) => l.remove());
-  for (const a of state.arrows) {
-    const [from, to] = a;
-    const p1 = sqCenter(from);
-    const p2 = sqCenter(to);
-    // stop short of the target center so the head sits on the square
-    const dx = p2.x - p1.x, dy = p2.y - p1.y, len = Math.hypot(dx, dy) || 1;
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', p1.x);
-    line.setAttribute('y1', p1.y);
-    line.setAttribute('x2', p2.x - (dx / len) * 0.35);
-    line.setAttribute('y2', p2.y - (dy / len) * 0.35);
-    svg.appendChild(line);
-  }
+// The sound a move makes, from its notation.
+function moveSound(san) {
+  if (san.includes('#')) return sounds.play('end');
+  if (san.includes('+')) return sounds.play('check');
+  if (san.includes('=')) return sounds.play('promote');
+  if (san.startsWith('O-O')) return sounds.play('castle');
+  sounds.play(san.includes('x') ? 'capture' : 'move');
 }
 
 function setStatus(text, cls = '') {
@@ -217,6 +204,8 @@ async function loadPuzzle(index, { announce = true } = {}) {
   state.highlights = [];
   state.arrows = [];
   state.sanLog = [];
+  state.badge = null;
+  audit('puzzle.load', { id: p.id, theme: p.theme, level: p.level, fen: p.fen });
   $('pTitle').textContent = p.title;
   $('pLevel').textContent = `Puzzle ${state.index + 1} of ${state.puzzles.length} · difficulty ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
   setStatus(`${sideName(state.chess.turn())} to move and win`);
@@ -241,52 +230,6 @@ async function puzzleContext(p) {
   );
 }
 
-function onSquare(square) {
-  closePromotion();
-  if (state.mode === 'review' && !state.trying) return;
-  if (state.busy || (state.mode === 'puzzle' && state.solved)) return;
-  const piece = state.chess.get(square);
-  const myTurn = state.chess.turn();
-  if (state.selected) {
-    const from = state.selected;
-    const legal = state.chess.moves({ square: from, verbose: true }).filter((m) => m.to === square);
-    if (legal.length) {
-      state.selected = null;
-      const play = (promotion) => (state.mode === 'review' ? reviewTry(from, square, promotion) : playerMove(from, square, promotion));
-      if (legal.some((m) => m.promotion)) {
-        render();
-        askPromotion(myTurn, play);
-      } else play();
-      return;
-    }
-  }
-  state.selected = piece && piece.color === myTurn ? square : null;
-  render();
-}
-
-// A pawn reaching the last rank: let the student choose the piece.
-function askPromotion(color, play) {
-  const box = $('promo');
-  box.innerHTML = '';
-  for (const type of ['q', 'r', 'b', 'n']) {
-    const b = document.createElement('button');
-    b.className = 'promo-piece';
-    b.style.backgroundImage = `url(${PIECE_URL(color, type)})`;
-    b.setAttribute('aria-label', `Promote to ${NAMES[type]}`);
-    b.addEventListener('click', () => {
-      closePromotion();
-      play(type);
-    });
-    box.appendChild(b);
-  }
-  box.hidden = false;
-  box.firstChild.focus();
-}
-
-function closePromotion() {
-  $('promo').hidden = true;
-}
-
 async function playerMove(from, to, promotion = 'q') {
   const p = puzzle();
   const fenBefore = state.chess.fen();
@@ -298,12 +241,15 @@ async function playerMove(from, to, promotion = 'q') {
   const correct = move.lan === expected || state.chess.isCheckmate();
   const who = state.player || 'The student';
   const moveWords = describeMoveWords(move, state.chess);
+  audit('puzzle.move', { id: p.id, fen: fenBefore, san: move.san, uci: move.lan, expected, correct });
+  moveSound(move.san);
 
   if (!correct) {
     render();
     setStatus(`${move.san} isn't it. Try again.`, 'bad');
     puzzleLog()?.wrong.push(move.san);
-    document.querySelector(`[data-square="${to}"]`)?.classList.add('wrong');
+    board.flash(to);
+    setTimeout(() => sounds.play('mistake'), 220);
     // Take the move back on a fixed timer, independent of the engine call, so
     // a slow server never leaves the board locked.
     state.busy = true;
@@ -336,7 +282,9 @@ async function playerMove(from, to, promotion = 'q') {
     state.solved = true;
     const pl = puzzleLog();
     if (pl) pl.solved = true;
-    setStatus('Solved! ✓', 'good');
+    setStatus('Solved', 'good');
+    audit('puzzle.solved', { id: p.id, wrong: pl?.wrong, hints: pl?.hints });
+    setTimeout(() => sounds.play('great'), 260);
     sendRespond(
       `[board] ${who} played ${move.san} (${moveWords}). Correct, and that SOLVES the puzzle (theme: ${p.theme}). ` +
         `Celebrate specifically, name the pattern so it sticks, then offer the next puzzle.`
@@ -347,6 +295,7 @@ async function playerMove(from, to, promotion = 'q') {
   // Correct but not finished: play the opponent's reply from the solution line.
   setStatus('Good move…', 'good');
   state.busy = true;
+  board.refresh();
   const gen = generation;
   await sleep(650);
   if (gen !== generation) return;
@@ -356,6 +305,7 @@ async function playerMove(from, to, promotion = 'q') {
   state.sanLog.push(reply.san);
   state.lastMove = reply;
   state.busy = false;
+  moveSound(reply.san);
   setStatus(`${sideName(state.chess.turn())} to move: finish it`, '');
   render();
   sendRespond(
@@ -393,11 +343,14 @@ async function playSolution() {
     const m = state.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
     state.sanLog.push(m.san);
     state.lastMove = m;
+    moveSound(m.san);
     render();
   }
   state.ply = p.line.length;
   state.solved = true;
   state.busy = false;
+  board.refresh();
+  audit('puzzle.solution_shown', { id: p.id });
   setStatus('Solution shown', '');
   return `The board is now animating the full solution: ${state.sanLog.join(' ')}. Idea: ${p.idea} Walk the student through why it works in one or two sentences, then offer the next puzzle.`;
 }
@@ -440,6 +393,7 @@ async function loadReview(pgn, side) {
     renderReviewPanel();
     gotoPly(0);
     log('review', 'in', `Analyzed ${review.moves.length} half-moves, ${review.keyMoments.length} key moments`);
+    audit('review.load', { pgn, side, headers: h, keyMoments: review.keyMoments, moves: review.moves.map((m) => `${m.san}${m.symbol}`) });
     if (state.sessionLog) {
       state.sessionLog.review = {
         game: `${h.White} vs ${h.Black}`,
@@ -497,7 +451,14 @@ function gotoPly(ply) {
   const r = state.review;
   if (!r) return;
   ply = Math.max(0, Math.min(r.moves.length, ply));
+  const step = ply - state.reviewPly;
+  const wasBrowsing = !state.moment;
   newPosition();
+  // Stepping one move forward or back slides the piece and plays its sound.
+  if (wasBrowsing && Math.abs(step) === 1) {
+    state.snap = false;
+    moveSound(r.moves[step === 1 ? ply - 1 : ply].san);
+  }
   state.reviewPly = ply;
   state.moment = null;
   state.trying = false;
@@ -507,6 +468,7 @@ function gotoPly(ply) {
   const m = r.moves[ply - 1];
   state.chess = new Chess(m ? m.fenAfter : r.startFen);
   state.lastMove = m ? { from: m.uci.slice(0, 2), to: m.uci.slice(2, 4) } : null;
+  state.badge = m && m.class ? { square: m.uci.slice(2, 4), cls: m.class } : null;
   if (m) {
     const cls = m.class ? ` · ${m.class}` : '';
     setStatus(`${moveLabel(m)} · eval ${evalText(m.evalAfter)}${cls}`, m.class === 'blunder' || m.class === 'mistake' ? 'bad' : '');
@@ -536,6 +498,8 @@ function gotoMoment(n) {
   state.selected = null;
   state.highlights = [];
   state.arrows = [];
+  state.badge = null;
+  audit('review.moment', { moment: k.index, ply: k.ply, played: m.san });
   state.chess = new Chess(m.fenBefore);
   state.lastMove = prev ? { from: prev.uci.slice(0, 2), to: prev.uci.slice(2, 4) } : null;
   setStatus(`Moment ${k.index}: you played ${m.san}. Find something better.`, '');
@@ -553,7 +517,9 @@ async function reviewTry(from, to, promotion = 'q') {
   const move = state.chess.move({ from, to, promotion });
   state.lastMove = move;
   state.busy = true;
+  state.badge = null;
   const gen = generation;
+  moveSound(move.san);
   render();
   setStatus('Checking with the engine…', '');
   const who = state.player || 'The student';
@@ -575,10 +541,13 @@ async function reviewTry(from, to, promotion = 'q') {
   }
   if (gen !== generation) return; // the student navigated away while the engine was thinking
   state.sessionLog?.review?.tries.push({ moment: state.moment, move: j.san, ok: j.ok });
+  audit('review.try', { moment: state.moment, fen, san: j.san, ok: j.ok, best: j.bestSan, lossPct: j.lossPct });
+  sounds.play(j.ok ? 'great' : 'mistake');
+  if (!j.ok) board.flash(to);
   if (j.ok) {
     state.trying = false;
     state.busy = false;
-    setStatus(`${j.san} works! ✓`, 'good');
+    setStatus(`${j.san} works`, 'good');
     render();
     sendRespond(
       `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). The engine approves: evaluation after it is ${j.evalAfter}` +
@@ -605,6 +574,7 @@ async function animateLine(fen, sans) {
   state.selected = null;
   state.highlights = [];
   state.arrows = [];
+  state.badge = null;
   state.chess = new Chess(fen);
   render();
   const played = [];
@@ -615,6 +585,7 @@ async function animateLine(fen, sans) {
       const m = state.chess.move(san);
       played.push(m.san);
       state.lastMove = m;
+      moveSound(m.san);
       render();
     } catch {
       break;
@@ -660,7 +631,8 @@ async function showPuzzleEngineLine() {
     state.chess = before.chess;
     state.lastMove = before.lastMove;
     state.busy = false;
-    setStatus(state.solved ? 'Solved! ✓' : `${sideName(state.chess.turn())} to move`, state.solved ? 'good' : '');
+    state.snap = true;
+    setStatus(state.solved ? 'Solved' : `${sideName(state.chess.turn())} to move`, state.solved ? 'good' : '');
     render();
   }, 4000);
   return `The board animated the engine's line from the current position: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
@@ -685,6 +657,7 @@ const TOOL_HANDLERS = {
       .map((m) => [m[1], m[2]]);
     state.highlights = squares;
     state.arrows = arrows;
+    sounds.play('click');
     render();
     const pieces = squares.map((s) => {
       const pc = state.chess.get(s);
@@ -740,6 +713,7 @@ async function handleToolCall(props) {
 // ---------------------------------------------------------------- protocol
 function sendProtocol(event_type, properties) {
   const msg = { message_type: 'conversation', event_type, conversation_id: state.conversationId, properties };
+  audit('tavus.sent', msg);
   if (state.call && state.conversationId) state.call.sendAppMessage(msg, '*');
   return msg;
 }
@@ -758,18 +732,30 @@ function sendContext(context) {
 
 function onAppMessage(ev) {
   const msg = ev.data || ev;
+  // Every interaction event goes to the audit log, including the ones the UI
+  // ignores. The once-a-second "still here" heartbeats are the one exception.
+  if (!/^system\.(replica|pal)_present$/.test(msg?.event_type || '')) audit('tavus.received', msg);
   if (!msg || msg.message_type !== 'conversation') return;
   const p = msg.properties || {};
+  // Tavus sends each coach utterance twice (role "replica" and role "pal"); show it once.
+  if (msg.event_type === 'conversation.utterance') {
+    const sig = `${p.role === 'user' ? 'user' : 'coach'}:${p.speech}`;
+    if (sig === state.lastUtterance) return;
+    state.lastUtterance = sig;
+  }
   switch (msg.event_type) {
     case 'conversation.tool_call':
       handleToolCall(p);
       break;
     case 'conversation.utterance': {
       const role = p.role === 'user' ? 'You' : 'Coach Rook';
-      if (p.speech) {
-        $('caption').innerHTML = `<b>${role}:</b> `;
-        $('caption').append(document.createTextNode(p.speech));
-        log(`utterance (${p.role})`, 'say', p.speech);
+      // Board messages come back as "user" speech; they are not something the student said.
+      if (p.speech && !(p.role === 'user' && p.speech.startsWith('[board]'))) {
+        const who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = `${role}: `;
+        $('caption').replaceChildren(who, document.createTextNode(p.speech));
+        log(`utterance (${p.role === 'user' ? 'student' : 'coach'})`, 'say', p.speech);
       }
       break;
     }
@@ -779,43 +765,106 @@ function onAppMessage(ev) {
 }
 
 // ---------------------------------------------------------------- session
+// The call runs on a Daily call object, not Daily's prebuilt UI: we render the
+// coach's video ourselves, so the panel shows the coach and nothing else.
+const setStage = (name) => {
+  $('stage').dataset.state = name;
+  $('callBar').hidden = name !== 'live';
+};
+
+function attach(el, track) {
+  el.srcObject = new MediaStream([track]);
+  el.play?.().catch(() => {});
+}
+
+function onTrackStarted(ev) {
+  if (!ev.participant || !ev.track) return;
+  audit('call.track_started', { kind: ev.track.kind, local: ev.participant.local });
+  if (ev.participant.local) {
+    if (ev.track.kind === 'video') {
+      attach($('selfVideo'), ev.track);
+      $('selfVideo').classList.remove('off');
+    }
+    return;
+  }
+  // The coach is the only remote participant.
+  if (ev.track.kind === 'video') attach($('coachVideo'), ev.track);
+  if (ev.track.kind === 'audio') attach($('coachAudio'), ev.track);
+}
+
+function onTrackStopped(ev) {
+  if (ev.participant?.local && ev.track?.kind === 'video') $('selfVideo').classList.add('off');
+}
+
+function syncCallButtons() {
+  const call = state.call;
+  if (!call) return;
+  const mic = call.localAudio();
+  const cam = call.localVideo();
+  $('micBtn').setAttribute('aria-pressed', String(mic));
+  $('micBtn').setAttribute('aria-label', mic ? 'Mute microphone' : 'Unmute microphone');
+  $('camBtn').setAttribute('aria-pressed', String(cam));
+  $('camBtn').setAttribute('aria-label', cam ? 'Turn camera off' : 'Turn camera on');
+}
+
 async function startSession() {
   state.player = $('player').value.trim();
   try { localStorage.setItem('coach-rook-player', state.player); } catch {}
-  $('start').disabled = true;
-  $('start').textContent = 'Starting…';
+  $('lobbyError').textContent = '';
+  $('caption').textContent = '';
+  $('stageNote').textContent = '';
+  setStage('connecting');
   let created = null; // conversation to end again if the video never connects
+  const attempt = (state.attempt = (state.attempt || 0) + 1); // lets Cancel abandon this start
+  const cancelled = () => state.attempt !== attempt;
   try {
-    if (!window.Daily) throw new Error('the video library did not load. Reload the page and try again.');
+    if (!window.Daily) throw new Error('The video library did not load. Reload the page and try again.');
     const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim() });
     created = conversation_id;
+    if (cancelled()) throw new Error('Cancelled.');
     state.conversationId = conversation_id;
     state.sessionLog = newSessionLog();
     log('session', 'in', `Conversation ${conversation_id} created${returning ? ' (returning student: last session notes sent to the coach)' : ''}`);
-    $('start').textContent = 'Click Join in the video panel';
-    $('videoEmpty').hidden = true;
-    state.call = window.Daily.createFrame($('video'), {
-      showLeaveButton: true,
-      iframeStyle: { position: 'absolute', inset: '0', width: '100%', height: '100%', border: '0' },
+    const call = (state.call = window.Daily.createCallObject());
+    call.on('app-message', onAppMessage);
+    call.on('track-started', onTrackStarted);
+    call.on('track-stopped', onTrackStopped);
+    call.on('left-meeting', endSession);
+    call.on('error', (ev) => log('video error', 'err', ev?.errorMsg || 'Video call error'));
+    call.on('camera-error', (ev) => {
+      audit('call.camera_error', { message: ev?.errorMsg?.errorMsg || ev?.error?.msg || String(ev?.errorMsg || '') });
+      $('stageNote').textContent = "Coach Rook can't hear you: allow the microphone for this site, then start again.";
     });
-    state.call.on('app-message', onAppMessage);
-    state.call.on('left-meeting', endSession);
-    state.call.on('error', (ev) => log('video error', 'err', ev?.errorMsg || 'Video call error'));
+    call.on('participant-updated', (ev) => ev.participant?.local && syncCallButtons());
+    call.on('network-quality-change', (ev) => audit('call.network', { threshold: ev?.threshold, quality: ev?.quality }));
     let briefed = false;
-    state.call.on('participant-joined', async (ev) => {
+    call.on('participant-joined', async (ev) => {
       // The PAL joins as a remote participant. Brief it on the board once.
       if (briefed || ev.participant.local) return;
       briefed = true;
+      audit('call.coach_joined', { session_id: ev.participant.session_id, user_name: ev.participant.user_name });
       if (state.mode === 'review' && state.review) sendContext(state.review.context);
       else sendContext(await puzzleContext(puzzle()) + (state.ply ? ` Moves played so far: ${state.sanLog.join(' ')}.` : ''));
     });
-    await state.call.join({ url: conversation_url, userName: state.player || 'Student' });
-    $('start').hidden = true;
-    $('stop').hidden = false;
+    call.on('participant-left', (ev) => {
+      if (ev.participant?.local) return;
+      audit('call.coach_left', { reason: ev.reason });
+      endSession(); // the coach hung up (time limit or timeout): the session is over
+    });
+    // Joining waits on the browser's microphone prompt; don't wait forever.
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The call did not connect. Allow the microphone and camera for this site, then try again.')), JOIN_TIMEOUT_MS);
+    });
+    const options = { url: conversation_url, userName: state.player || 'Student', ...(NO_MEDIA ? { startVideoOff: true, startAudioOff: true } : {}) };
+    await Promise.race([call.join(options), timeout]).finally(() => clearTimeout(timer));
+    if (cancelled()) throw new Error('Cancelled.');
+    audit('call.joined', { conversation_id });
+    setStage('live');
+    syncCallButtons();
   } catch (e) {
-    const msg = e?.message || e?.errorMsg || 'the video call could not connect';
+    const msg = e?.message || e?.errorMsg || 'The video call could not connect.';
     log('error', 'err', msg);
-    alert(`Couldn't start the session: ${msg}`);
     if (state.call) {
       try { state.call.destroy(); } catch {}
       state.call = null;
@@ -824,11 +873,17 @@ async function startSession() {
     state.sessionLog = null;
     // Don't leave a conversation running (and billing) that nobody joined.
     if (created) api('/api/session/end', { conversation_id: created, code: $('code').value.trim() }).catch(() => {});
-    $('videoEmpty').hidden = false;
-  } finally {
-    $('start').disabled = false;
-    $('start').textContent = 'Start coaching session';
+    setStage('lobby');
+    $('lobbyError').textContent = msg === 'Cancelled.' ? '' : msg;
   }
+}
+
+// Cancel while connecting: abandon the attempt; startSession's cleanup ends the conversation.
+function cancelStart() {
+  state.attempt = (state.attempt || 0) + 1;
+  audit('call.cancelled', {});
+  if (state.conversationId) endSession(); // leaves the call and ends the conversation
+  else setStage('lobby'); // still creating it; startSession ends it once it exists
 }
 
 function sessionSummary() {
@@ -837,8 +892,9 @@ function sessionSummary() {
 
 // Closing the tab mid-session: still end the conversation and save the note.
 window.addEventListener('pagehide', () => {
+  flushAudit(true);
   if (!state.conversationId || !navigator.sendBeacon) return;
-  const body = { conversation_id: state.conversationId, player: state.player, key: notebookKey(), code: $('code').value.trim(), summary: sessionSummary() };
+  const body = { conversation_id: state.conversationId, player: state.player, key: notebookKey(), code: $('code').value.trim(), summary: sessionSummary(), client: CLIENT_ID };
   navigator.sendBeacon('/api/session/end', new Blob([JSON.stringify(body)], { type: 'application/json' }));
 });
 
@@ -849,11 +905,11 @@ async function endSession() {
     const call = state.call;
     state.call = null;
     try { await call.leave(); } catch {}
-    call.destroy();
+    try { call.destroy(); } catch {}
   }
-  $('videoEmpty').hidden = false;
-  $('start').hidden = false;
-  $('stop').hidden = true;
+  for (const el of [$('coachVideo'), $('coachAudio'), $('selfVideo')]) el.srcObject = null;
+  $('selfVideo').classList.add('off');
+  setStage('lobby');
   if (id) {
     log('session', 'in', `Conversation ${id} ended`);
     const summary = sessionSummary();
@@ -874,7 +930,7 @@ async function loadNotebook() {
   const name = $('player').value.trim();
   const code = $('code').value.trim();
   const box = $('notebook');
-  if (!name || !state.tavusReady || ($('code').hidden === false && !code)) {
+  if (!name || !state.tavusReady || (!$('codeField').hidden && !code)) {
     box.hidden = true;
     return;
   }
@@ -888,15 +944,15 @@ async function loadNotebook() {
     const notes = mem.pinned || [];
     const learned = mem.learned && learnedLines(mem.learned);
     if (!notes.length && !learned?.length) {
-      list.innerHTML = '<li class="muted">Nothing yet. After your first session, Coach Rook writes down what you nailed and what tripped you up.</li>';
+      list.innerHTML = '<li class="empty">Nothing yet. After each session Coach Rook notes what you nailed and what tripped you up.</li>';
       return;
     }
-    for (const n of notes.slice(-5).reverse()) {
+    for (const n of notes.slice(-3).reverse()) {
       const li = document.createElement('li');
       li.textContent = n.text;
       list.appendChild(li);
     }
-    for (const l of (learned || []).slice(0, 4)) {
+    for (const l of (learned || []).slice(0, 2)) {
       const li = document.createElement('li');
       li.className = 'learned';
       li.textContent = l;
@@ -943,14 +999,53 @@ function setupSim() {
 }
 
 // ---------------------------------------------------------------- boot
+function setHood(open) {
+  $('hood').hidden = !open;
+  $('hoodBtn').setAttribute('aria-expanded', String(open));
+  try { localStorage.setItem('coach-rook-hood', open ? 'open' : 'closed'); } catch {}
+}
+
+function syncSoundButton() {
+  $('soundBtn').setAttribute('aria-pressed', String(!sounds.isMuted()));
+  $('soundBtn').setAttribute('aria-label', sounds.isMuted() ? 'Turn sound on' : 'Turn sound off');
+}
+
 async function boot() {
-  $('board').setAttribute('role', 'group');
+  audit('visit', { url: location.pathname + (SIM ? '?sim' : ''), referrer: document.referrer || undefined, screen: `${innerWidth}x${innerHeight}`, agent: navigator.userAgent });
   try { $('player').value = localStorage.getItem('coach-rook-player') || ''; } catch {}
+  // Browsers only allow audio after a gesture; the first click or key unlocks it.
+  for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, sounds.unlock, { once: true });
+  syncSoundButton();
+  $('soundBtn').addEventListener('click', () => {
+    sounds.setMuted(!sounds.isMuted());
+    syncSoundButton();
+    sounds.play('click');
+  });
+  let hoodOpen = SIM;
+  try { hoodOpen ||= localStorage.getItem('coach-rook-hood') === 'open'; } catch {}
+  setHood(hoodOpen);
+  $('hoodBtn').addEventListener('click', () => setHood($('hood').hidden));
+  $('hoodClose').addEventListener('click', () => setHood(false));
+  if (SIM) setupSim();
+
   state.puzzles = await api('/api/puzzles');
   await loadPuzzle(0, { announce: false });
   $('retry').addEventListener('click', () => loadPuzzle(state.index));
   $('next').addEventListener('click', () => loadPuzzle(state.index + 1));
-  $('start').addEventListener('click', startSession);
+  $('lobby').addEventListener('submit', (e) => {
+    e.preventDefault();
+    startSession();
+  });
+  $('stop').addEventListener('click', endSession);
+  $('cancelCall').addEventListener('click', cancelStart);
+  $('micBtn').addEventListener('click', () => {
+    state.call?.setLocalAudio(!state.call.localAudio());
+    syncCallButtons();
+  });
+  $('camBtn').addEventListener('click', () => {
+    state.call?.setLocalVideo(!state.call.localVideo());
+    syncCallButtons();
+  });
   document.querySelectorAll('[data-tab]').forEach((t) =>
     t.addEventListener('click', () => {
       if (t.dataset.tab === 'puzzle') loadPuzzle(state.index);
@@ -986,10 +1081,10 @@ async function boot() {
     if (e.key === 'ArrowLeft') gotoPly(state.reviewPly - 1);
     if (e.key === 'ArrowRight') gotoPly(state.reviewPly + 1);
   });
-  $('stop').addEventListener('click', endSession);
+
   const cfg = await api('/api/config');
   state.tavusReady = cfg.tavusReady;
-  if (cfg.needsCode) $('code').hidden = false;
+  $('codeField').hidden = !cfg.needsCode;
   try { $('code').value = localStorage.getItem('coach-rook-code') || ''; } catch {}
   const refresh = () => {
     try { localStorage.setItem('coach-rook-code', $('code').value.trim()); } catch {}
@@ -1004,17 +1099,12 @@ async function boot() {
     }
     setTimeout(() => ($('nbKeyCopy').textContent = 'Copy'), 1500);
   });
-  $('nbKeyChange').addEventListener('click', () => {
-    $('nbKeyForm').hidden = !$('nbKeyForm').hidden;
-    if (!$('nbKeyForm').hidden) $('nbKeyInput').focus();
-  });
   $('nbKeyForm').addEventListener('submit', (e) => {
     e.preventDefault();
     if (state.conversationId) return ($('nbKeyError').textContent = 'End the current session first.');
     if (!useNotebookKey($('nbKeyInput').value)) return ($('nbKeyError').textContent = "That doesn't look like a notebook key.");
     $('nbKeyInput').value = '';
     $('nbKeyError').textContent = '';
-    $('nbKeyForm').hidden = true;
     loadNotebook();
   });
   $('player').addEventListener('change', refresh);
@@ -1022,9 +1112,8 @@ async function boot() {
   loadNotebook();
   if (!cfg.tavusReady) {
     $('start').disabled = true;
-    $('setupHint').textContent = 'Video coach not configured on this server (set TAVUS_API_KEY and run npm run setup). The board and engine still work.';
+    $('setupHint').textContent = 'The video coach is not set up on this server. The board and engine still work.';
   }
-  if (SIM) setupSim();
 }
 
 boot().catch((e) => {
