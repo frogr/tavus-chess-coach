@@ -62,11 +62,13 @@ function palBody() {
 }
 
 const PAL_NAME = 'Coach Rook (chess puzzles)';
+const nameKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 async function findPalByName() {
   for (let page = 1; page <= 5; page++) {
     const res = await tavus('GET', `/pals?limit=100&page=${page}&pal_type=user`).catch(() => ({ data: [] }));
-    const hit = (res.data || []).find((p) => p.pal_name === PAL_NAME);
+    // Tavus strips punctuation from stored names, so compare letters and digits only.
+    const hit = (res.data || []).find((p) => nameKey(p.pal_name) === nameKey(PAL_NAME));
     if (hit) return hit.pal_id;
     if (!res.data || res.data.length < 100) return null;
   }
