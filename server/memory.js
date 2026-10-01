@@ -10,6 +10,7 @@
 //    they're ground truth rather than the model's impression of the call.
 const crypto = require('crypto');
 const { tavus } = require('./tavus');
+const { httpError } = require('./errors');
 const PUZZLES = require('./puzzles');
 
 const MAX_PINNED = 30; // Tavus limit per store
@@ -20,12 +21,25 @@ function cleanName(name) {
   return String(name ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
 
-function participantTag(name) {
+// A notebook key is a random secret the student's browser generates and keeps.
+// It is accepted with or without the dashes it is displayed with.
+function cleanKey(key) {
+  const k = String(key ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return k.length >= 16 && k.length <= 64 ? k : null;
+}
+
+// The memory store a student's notes live in. The tag depends on the name AND
+// the notebook key, so typing someone else's name does not open their
+// notebook: you would also need the key from their browser.
+// Returns null when no name was given (a session without memory).
+function participantTag(name, key) {
   const clean = cleanName(name).toLowerCase();
   if (!clean) return null;
-  const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  // Names with no ASCII letters (e.g. "张伟") still get a stable tag.
-  return `chess-student-${slug || crypto.createHash('sha1').update(clean).digest('hex').slice(0, 12)}`;
+  const k = cleanKey(key);
+  if (!k) throw httpError(400, 'Your notebook key is missing or not valid. Reload the page and try again.');
+  const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'student';
+  const digest = crypto.createHash('sha256').update(`${clean}\n${k}`).digest('hex').slice(0, 16);
+  return `chess-student-${slug}-${digest}`;
 }
 
 // The session summary comes from the browser and is written into long-lived
@@ -77,8 +91,8 @@ async function ensureStore(palId, tag) {
   }
 }
 
-async function getMemory(palId, name) {
-  const tag = participantTag(name);
+async function getMemory(palId, name, key) {
+  const tag = participantTag(name, key);
   if (!tag) return { pinned: [], learned: null };
   const id = await findStore(palId, tag);
   if (!id) return { pinned: [], learned: null };
@@ -117,8 +131,8 @@ function sessionNote(summary, date = new Date()) {
   return note;
 }
 
-async function recordSession(palId, name, summary) {
-  const tag = participantTag(name);
+async function recordSession(palId, name, key, summary) {
+  const tag = participantTag(name, key);
   if (!tag) return { saved: false, reason: 'no name' };
   const note = sessionNote(sanitizeSummary(summary));
   if (!note) return { saved: false, reason: 'nothing happened on the board' };
@@ -136,4 +150,4 @@ async function recordSession(palId, name, summary) {
   return { saved: true, note };
 }
 
-module.exports = { cleanName, participantTag, getMemory, recordSession, sessionNote, sanitizeSummary };
+module.exports = { cleanName, cleanKey, participantTag, getMemory, recordSession, sessionNote, sanitizeSummary };

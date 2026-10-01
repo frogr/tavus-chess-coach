@@ -62,6 +62,9 @@ test('PGN header text is flattened and capped before it reaches the coach', asyn
   const pgn = `[White "${'W'.repeat(200)}"]\n[Black "B"]\n\n1. e4 e5 *`;
   const review = await reviewGame(pgn, null);
   assert.equal(review.headers.White.length, 60);
+  const bare = await reviewGame('1. e4 e5 2. Nf3 *', null);
+  assert.equal(bare.headers.White, 'White');
+  assert.equal(bare.headers.Black, 'Black');
 });
 
 test('judgeMove accepts the winning move, rejects a weak one, and 400s on an illegal one', async () => {

@@ -135,10 +135,14 @@ function readBody(req) {
   });
 }
 
-// Behind Render's proxy the caller's address is the first X-Forwarded-For entry.
+// Who is calling, for rate limiting. Render sits behind Cloudflare, which sets
+// CF-Connecting-IP itself and overwrites anything the caller sent, so prefer
+// it: the first X-Forwarded-For entry can be forged by the caller.
 function clientIp(req) {
-  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return fwd || req.socket.remoteAddress || 'unknown';
+  const h = req.headers;
+  const cf = String(h['cf-connecting-ip'] || '').trim();
+  const fwd = String(h['x-forwarded-for'] || '').split(',')[0].trim();
+  return cf || fwd || req.socket.remoteAddress || 'unknown';
 }
 
 // Validates a FEN from the client and returns it in canonical form.
@@ -259,20 +263,20 @@ const routes = {
     return judgeMove(fen, move);
   },
 
-  'POST /api/session': async ({ player, code }, { ip }) => {
+  'POST /api/session': async ({ player, key, code }, { ip }) => {
     checkCode(code, ip);
     budget(limits.session, ip, 'sessions');
     await palSettled();
     const cfg = requirePal();
     const name = cleanName(player) || null;
-    const tag = participantTag(name);
+    const tag = participantTag(name, key);
 
     // Returning student? Read their session notes so the opener can pick up
     // exactly where they left off. (Tavus also gives the PAL these pinned
     // memories plus its learned memory; putting the latest notes in the
     // conversational context makes the generated greeting use them.)
     let notes = [];
-    if (tag) notes = (await getMemory(cfg.pal_id, name).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
+    if (tag) notes = (await getMemory(cfg.pal_id, name, key).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
     const recent = notes.filter((n) => n.startsWith('Session note')).slice(-3);
     const returning = recent.length > 0;
 
@@ -313,7 +317,7 @@ const routes = {
   // End the call and write what happened on the board into the student's memory.
   // Needs the access code like starting one does: it calls Tavus with the
   // owner's key and writes to a student's memory.
-  'POST /api/session/end': async ({ conversation_id, player, code, summary }, { ip }) => {
+  'POST /api/session/end': async ({ conversation_id, player, key, code, summary }, { ip }) => {
     checkCode(code, ip);
     const cfg = requirePal();
     if (typeof conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(conversation_id)) {
@@ -321,7 +325,8 @@ const routes = {
     }
     const name = cleanName(player);
     if (!name || !summary) return { ok: true, saved: false };
-    const result = await recordSession(cfg.pal_id, name, summary).catch((e) => {
+    const result = await recordSession(cfg.pal_id, name, key, summary).catch((e) => {
+      if (e.expose) throw e;
       console.error(`session note not saved: ${e.message}`);
       return { saved: false, reason: 'the memory service returned an error' };
     });
@@ -329,11 +334,11 @@ const routes = {
   },
 
   // What Coach Rook remembers about a student (pinned notes + Tavus learned memory).
-  'POST /api/memory': async ({ player, code }, { ip }) => {
+  'POST /api/memory': async ({ player, key, code }, { ip }) => {
     checkCode(code, ip);
     await palSettled();
     const cfg = requirePal();
-    return getMemory(cfg.pal_id, cleanName(player));
+    return getMemory(cfg.pal_id, cleanName(player), key);
   },
 };
 

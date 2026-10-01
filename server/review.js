@@ -29,7 +29,7 @@ let active = 0;
 // PGN headers are free text that ends up in the PAL's context and on screen.
 function cleanHeader(value, fallback) {
   const text = String(value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-  return text || fallback;
+  return text && !/^\?+$/.test(text) ? text : fallback; // chess.js fills missing names with "?"
 }
 
 // Engine line -> centipawns from White's point of view (mates mapped to +-10000).

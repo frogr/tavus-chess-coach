@@ -47,6 +47,7 @@
       </div>
       <div class="board-wrap">
         <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to."></div>
+        <div id="promo" class="promo" role="group" aria-label="Choose a piece to promote to" hidden></div>
         <svg id="arrows" class="arrows" viewBox="0 0 8 8" preserveAspectRatio="none">
           <defs>
             <marker id="head" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto">
@@ -94,6 +95,17 @@
         <h2>Coach's notebook · <span id="nbName"></span></h2>
         <p class="muted small">What Coach Rook remembers about you (your Tavus memory store). Updated after every session.</p>
         <ul id="nbNotes"></ul>
+        <div class="nb-key muted small">
+          <p>This notebook belongs to this browser. To open it on another device, enter the same name there and this key:</p>
+          <code id="nbKey"></code>
+          <button id="nbKeyCopy" class="ghost small-btn">Copy</button>
+          <button id="nbKeyChange" class="ghost small-btn">Use a key from another device</button>
+          <form id="nbKeyForm" hidden>
+            <input id="nbKeyInput" placeholder="Paste your notebook key" maxlength="80" autocomplete="off" aria-label="Notebook key from another device" />
+            <button class="ghost small-btn">Use this key</button>
+            <span id="nbKeyError" role="alert"></span>
+          </form>
+        </div>
       </div>
       <h2>Under the hood</h2>
       <p class="muted small">Every tool call the PAL makes and every board event sent to it, live.</p>

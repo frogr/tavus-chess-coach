@@ -138,3 +138,18 @@ body[data-mode="review"] .puzzle-only { display: none; }
 .notebook li.learned { border-left-color: #9ab8ff; color: var(--muted); }
 .sq:focus { outline: none; }
 .sq:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; z-index: 1; }
+
+/* promotion picker */
+.promo { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0, 0, 0, .55); }
+.promo[hidden] { display: none; }
+.promo-piece { width: 16%; aspect-ratio: 1; padding: 0; background: var(--light) center / 86% no-repeat; border: 2px solid var(--line); border-radius: 10px; }
+.promo-piece:hover, .promo-piece:focus-visible { border-color: var(--accent); outline: none; }
+
+/* notebook key */
+.nb-key { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.nb-key p { margin: 0 0 6px; }
+.nb-key code { display: block; margin-bottom: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--text); user-select: all; word-break: break-all; }
+.nb-key form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.nb-key form[hidden] { display: none; }
+.nb-key input { flex: 1; min-width: 160px; background: var(--panel); border: 1px solid var(--line); color: var(--text); padding: 6px 10px; border-radius: 8px; font-size: 12px; }
+#nbKeyError { color: var(--bad); flex-basis: 100%; }

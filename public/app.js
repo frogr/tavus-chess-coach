@@ -55,6 +55,7 @@ const puzzle = () => state.puzzles[state.index];
 // puzzles mid-animation can never play stale moves or leave the board locked.
 let generation = 0;
 function newPosition() {
+  closePromotion();
   state.busy = false;
   return ++generation;
 }
@@ -65,6 +66,37 @@ async function api(path, body) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+
+// ---------------------------------------------------------------- notebook key
+// A random secret generated in this browser. The server derives the student's
+// memory store from name + key, so someone else typing the same name gets a
+// different (empty) notebook. To use a notebook on another device, the
+// student copies the key across.
+const KEY_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no look-alikes (0/o, 1/l/i)
+const normalizeKey = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const validKey = (k) => k.length >= 16 && k.length <= 64;
+const formatKey = (k) => k.match(/.{1,5}/g).join('-');
+let memoryKey = null;
+
+function notebookKey() {
+  if (memoryKey) return memoryKey;
+  try {
+    const stored = normalizeKey(localStorage.getItem('coach-rook-key'));
+    if (validKey(stored)) return (memoryKey = stored);
+  } catch {}
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  memoryKey = Array.from(bytes, (b) => KEY_ALPHABET[b % KEY_ALPHABET.length]).join('');
+  try { localStorage.setItem('coach-rook-key', memoryKey); } catch {}
+  return memoryKey;
+}
+
+function useNotebookKey(text) {
+  const k = normalizeKey(text);
+  if (!validKey(k)) return false;
+  memoryKey = k;
+  try { localStorage.setItem('coach-rook-key', k); } catch {}
+  return true;
 }
 
 // ---------------------------------------------------------------- feed log
@@ -198,7 +230,9 @@ async function loadPuzzle(index, { announce = true } = {}) {
 // What the PAL needs to know about a freshly loaded puzzle. The solution is
 // included (marked secret) so it can give graded hints without guessing.
 async function puzzleContext(p) {
-  const { text } = await api('/api/describe', { fen: p.fen });
+  // If the description can't be fetched the puzzle still loads; the coach
+  // just gets the solution and idea without the piece list.
+  const { text } = await api('/api/describe', { fen: p.fen }).catch(() => ({ text: '(piece list unavailable)' }));
   return (
     `[board] New puzzle loaded: "${p.title}", puzzle ${state.index + 1} of ${state.puzzles.length}, difficulty ${p.level} of 3. ` +
     `Position: ${text} The student plays ${sideName(new Chess(p.fen).turn())}, and the goal is to find the winning move. ` +
@@ -208,17 +242,21 @@ async function puzzleContext(p) {
 }
 
 function onSquare(square) {
+  closePromotion();
   if (state.mode === 'review' && !state.trying) return;
   if (state.busy || (state.mode === 'puzzle' && state.solved)) return;
   const piece = state.chess.get(square);
   const myTurn = state.chess.turn();
   if (state.selected) {
     const from = state.selected;
-    const legal = state.chess.moves({ square: from, verbose: true }).find((m) => m.to === square);
-    if (legal) {
+    const legal = state.chess.moves({ square: from, verbose: true }).filter((m) => m.to === square);
+    if (legal.length) {
       state.selected = null;
-      if (state.mode === 'review') reviewTry(from, square);
-      else playerMove(from, square);
+      const play = (promotion) => (state.mode === 'review' ? reviewTry(from, square, promotion) : playerMove(from, square, promotion));
+      if (legal.some((m) => m.promotion)) {
+        render();
+        askPromotion(myTurn, play);
+      } else play();
       return;
     }
   }
@@ -226,10 +264,33 @@ function onSquare(square) {
   render();
 }
 
-async function playerMove(from, to) {
+// A pawn reaching the last rank: let the student choose the piece.
+function askPromotion(color, play) {
+  const box = $('promo');
+  box.innerHTML = '';
+  for (const type of ['q', 'r', 'b', 'n']) {
+    const b = document.createElement('button');
+    b.className = 'promo-piece';
+    b.style.backgroundImage = `url(${PIECE_URL(color, type)})`;
+    b.setAttribute('aria-label', `Promote to ${NAMES[type]}`);
+    b.addEventListener('click', () => {
+      closePromotion();
+      play(type);
+    });
+    box.appendChild(b);
+  }
+  box.hidden = false;
+  box.firstChild.focus();
+}
+
+function closePromotion() {
+  $('promo').hidden = true;
+}
+
+async function playerMove(from, to, promotion = 'q') {
   const p = puzzle();
   const fenBefore = state.chess.fen();
-  const move = state.chess.move({ from, to, promotion: 'q' });
+  const move = state.chess.move({ from, to, promotion });
   state.lastMove = move;
   state.highlights = [];
   state.arrows = [];
@@ -487,9 +548,9 @@ function gotoMoment(n) {
   );
 }
 
-async function reviewTry(from, to) {
+async function reviewTry(from, to, promotion = 'q') {
   const fen = state.chess.fen();
-  const move = state.chess.move({ from, to, promotion: 'q' });
+  const move = state.chess.move({ from, to, promotion });
   state.lastMove = move;
   state.busy = true;
   const gen = generation;
@@ -726,7 +787,7 @@ async function startSession() {
   let created = null; // conversation to end again if the video never connects
   try {
     if (!window.Daily) throw new Error('the video library did not load. Reload the page and try again.');
-    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, code: $('code').value.trim() });
+    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim() });
     created = conversation_id;
     state.conversationId = conversation_id;
     state.sessionLog = newSessionLog();
@@ -777,7 +838,7 @@ function sessionSummary() {
 // Closing the tab mid-session: still end the conversation and save the note.
 window.addEventListener('pagehide', () => {
   if (!state.conversationId || !navigator.sendBeacon) return;
-  const body = { conversation_id: state.conversationId, player: state.player, code: $('code').value.trim(), summary: sessionSummary() };
+  const body = { conversation_id: state.conversationId, player: state.player, key: notebookKey(), code: $('code').value.trim(), summary: sessionSummary() };
   navigator.sendBeacon('/api/session/end', new Blob([JSON.stringify(body)], { type: 'application/json' }));
 });
 
@@ -798,7 +859,7 @@ async function endSession() {
     const summary = sessionSummary();
     state.sessionLog = null;
     try {
-      const r = await api('/api/session/end', { conversation_id: id, player: state.player, code: $('code').value.trim(), summary });
+      const r = await api('/api/session/end', { conversation_id: id, player: state.player, key: notebookKey(), code: $('code').value.trim(), summary });
       if (r.saved) log('memory → pinned session note', 'out', r.note);
       else if (state.player) log('memory', 'in', `No session note saved (${r.reason || 'nothing to save'})`);
     } catch {}
@@ -818,9 +879,10 @@ async function loadNotebook() {
     return;
   }
   try {
-    const mem = await api('/api/memory', { player: name, code });
+    const mem = await api('/api/memory', { player: name, key: notebookKey(), code });
     box.hidden = false;
     $('nbName').textContent = name;
+    $('nbKey').textContent = formatKey(notebookKey());
     const list = $('nbNotes');
     list.innerHTML = '';
     const notes = mem.pinned || [];
@@ -933,6 +995,28 @@ async function boot() {
     try { localStorage.setItem('coach-rook-code', $('code').value.trim()); } catch {}
     loadNotebook();
   };
+  $('nbKeyCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(formatKey(notebookKey()));
+      $('nbKeyCopy').textContent = 'Copied';
+    } catch {
+      $('nbKeyCopy').textContent = 'Select and copy it';
+    }
+    setTimeout(() => ($('nbKeyCopy').textContent = 'Copy'), 1500);
+  });
+  $('nbKeyChange').addEventListener('click', () => {
+    $('nbKeyForm').hidden = !$('nbKeyForm').hidden;
+    if (!$('nbKeyForm').hidden) $('nbKeyInput').focus();
+  });
+  $('nbKeyForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (state.conversationId) return ($('nbKeyError').textContent = 'End the current session first.');
+    if (!useNotebookKey($('nbKeyInput').value)) return ($('nbKeyError').textContent = "That doesn't look like a notebook key.");
+    $('nbKeyInput').value = '';
+    $('nbKeyError').textContent = '';
+    $('nbKeyForm').hidden = true;
+    loadNotebook();
+  });
   $('player').addEventListener('change', refresh);
   $('code').addEventListener('change', refresh);
   loadNotebook();

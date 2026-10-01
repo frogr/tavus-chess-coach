@@ -3,18 +3,32 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { cleanName, participantTag, sessionNote, sanitizeSummary } = require('../server/memory');
 
-test('participantTag is stable across spacing and case, and null without a name', () => {
-  assert.equal(participantTag('  Austin  French '), 'chess-student-austin-french');
-  assert.equal(participantTag('AUSTIN french'), 'chess-student-austin-french');
-  assert.equal(participantTag(''), null);
-  assert.equal(participantTag(undefined), null);
+const KEY = 'abcde-fghjk-mnpqr-stuvw';
+
+test('participantTag is stable across spacing, case and key formatting; null without a name', () => {
+  const tag = participantTag('  Austin  French ', KEY);
+  assert.match(tag, /^chess-student-austin-french-[0-9a-f]{16}$/);
+  assert.equal(participantTag('AUSTIN french', 'ABCDEFGHJKMNPQRSTUVW'), tag);
+  assert.equal(participantTag('', KEY), null);
+  assert.equal(participantTag(undefined, undefined), null);
 });
 
-test('participantTag still works for names with no ASCII letters', () => {
-  const tag = participantTag('张伟');
-  assert.match(tag, /^chess-student-[0-9a-f]{12}$/);
-  assert.equal(tag, participantTag(' 张伟 '));
-  assert.notEqual(tag, participantTag('李娜'));
+test('the same name with a different notebook key is a different student', () => {
+  assert.notEqual(participantTag('Austin', KEY), participantTag('Austin', 'zzzzz-zzzzz-zzzzz-zzzzz'));
+});
+
+test('a name without a valid notebook key is refused', () => {
+  for (const key of [undefined, '', 'short', 'x'.repeat(65), { length: 20 }]) {
+    assert.throws(() => participantTag('Austin', key), { status: 400 });
+  }
+});
+
+test('participantTag works for names with no ASCII letters and stays short', () => {
+  const tag = participantTag('张伟', KEY);
+  assert.match(tag, /^chess-student-student-[0-9a-f]{16}$/);
+  assert.equal(tag, participantTag(' 张伟 ', KEY));
+  assert.notEqual(tag, participantTag('李娜', KEY));
+  assert.ok(participantTag('a'.repeat(40), KEY).length <= 60);
 });
 
 test('cleanName strips control characters and caps the length', () => {

@@ -132,6 +132,26 @@ test('session routes say the coach is not configured rather than failing', async
   assert.equal((await res.json()).error, 'Video coach is not configured on this server.');
 });
 
+test('the browser code parses as an ES module', async () => {
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const copy = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'coach-rook-app-')), 'app.mjs');
+  fs.copyFileSync(path.join(__dirname, '..', 'public', 'app.js'), copy);
+  execFileSync(process.execPath, ['--check', copy]);
+});
+
+test('a forged X-Forwarded-For does not dodge the limit when the proxy reports the real address', async () => {
+  const real = '203.0.113.77';
+  const statuses = [];
+  for (let i = 0; i < 10; i++) {
+    const headers = { 'CF-Connecting-IP': real, 'X-Forwarded-For': `10.0.0.${i}` };
+    statuses.push((await app.post('/api/analyze', { fen: '3R2k1/5ppp/8/8/8/8/5PPP/6K1 b - - 1 1' }, headers)).status);
+  }
+  assert.deepEqual(statuses, [...Array(8).fill(200), 429, 429]);
+});
+
 test('engine endpoints are rate limited per client', async () => {
   const statuses = [];
   for (let i = 0; i < 12; i++) {

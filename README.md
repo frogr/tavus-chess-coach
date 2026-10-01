@@ -19,6 +19,8 @@ npm test                    # unit + HTTP tests; Tavus is faked, no key or minut
 
 Render reads `render.yaml`, asks for `TAVUS_API_KEY` and an `ACCESS_CODE`, and boots the server, which registers the PAL and tools on first start. The access code matters on a public URL: every video session spends the account's Tavus minutes, so the board and engine are open to anyone, but starting the coach needs the code. Free instances sleep when idle, so the first load after a while takes ~30 seconds.
 
+Deploys are gated on tests: `render.yaml` sets `autoDeployTrigger: checksPass`, so once the repo is connected to Render through the GitHub integration, a push to `main` goes live only after the CI workflow passes. Until it is connected, deploy by hand with `render deploys create <service-id>`.
+
 Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes.
 
 ## Memory: the coach remembers you
@@ -78,7 +80,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)". This was the single biggest reliability lever.
 - **Every puzzle is engine-verified.** `npm run verify-puzzles` checks that each solution's first move is Stockfish's unique top choice and the line is decisive. I rejected two of my own candidates this way (one had several equally winning answers, one was a dead draw).
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while you calculate, and `idle_engagement: patient` gives a gentle nudge rather than an answer when you go quiet.
-- **Memory is written from the board, not inferred from the call.** Pinned session notes come from what actually happened on the board; Tavus learned memory adds the softer context. (For a real product, the participant tag would be a user ID, not a typed name.)
+- **Memory is written from the board, not inferred from the call.** Pinned session notes come from what actually happened on the board; Tavus learned memory adds the softer context. The memory store is keyed to the student's name plus a random **notebook key** generated in their browser, so someone else typing the same name gets an empty notebook, not theirs. The key is shown in the notebook panel so it can be carried to another device.
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general STT mangles.
 - **Key stays on the server.** The browser only ever gets a `conversation_url`.
 - **Setup is code, not clicks.** `npm run setup` is idempotent: tools are matched by name and patched, the PAL is found by ID or name and patched in place. A customer can re-run it after every prompt change and diff the config in git, and a fresh deploy configures itself on boot.
@@ -102,8 +104,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **Real puzzle supply:** the Lichess puzzle database filtered by theme and rating, with the same verify step in the import.
 - **Voice moves:** "knight to d6" spoken → move played, via a tool that parses the move and plays it on the board.
 - **Play a game against the coach:** Stockfish at reduced strength as the opponent, with the coach speaking up only at moments that matter (a big swing, a tactic on the board), not on every move.
-- **Real accounts:** the memory tag is the typed name, so anyone with the access code can read or add to another student's notebook by typing their name. A product would key memory to a signed-in user.
-- **Underpromotion:** pawns always promote to a queen on the board.
+- **Real accounts:** a notebook key is a stand-in for signing in. A product would key memory to an authenticated user.
 
 ## Files
 
