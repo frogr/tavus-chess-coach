@@ -26,7 +26,8 @@ async function tavus(method, path, body) {
   } catch {
     data = { raw: text };
   }
-  if (!res.ok) {
+  // Tavus answers a PATCH that changes nothing with 304 Not Modified: that is a success.
+  if (!res.ok && res.status !== 304) {
     const err = new Error(`Tavus ${method} ${path} -> ${res.status}: ${text.slice(0, 400)}`);
     err.status = res.status;
     err.data = data;

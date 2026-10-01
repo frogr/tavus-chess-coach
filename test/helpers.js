@@ -102,7 +102,15 @@ async function startFakeTavus(state = {}) {
       }
       if ((m = route.match(/^PATCH \/pals\/(\w+)$/))) {
         if (db.failPalPatch) return reply(500, { message: 'temporary failure' });
-        return db.pals.some((p) => p.pal_id === m[1]) ? reply(200, {}) : reply(404, { message: 'not found' });
+        const pal = db.pals.find((p) => p.pal_id === m[1]);
+        if (!pal) return reply(404, { message: 'not found' });
+        // Like the real API: a patch that changes nothing is a bodyless 304.
+        if (pal.lastPatch === raw) {
+          res.writeHead(304);
+          return res.end();
+        }
+        pal.lastPatch = raw;
+        return reply(200, {});
       }
       if ((m = route.match(/^GET \/pals\/(\w+)\/tools$/))) return reply(200, { data: [] });
       if ((m = route.match(/^POST \/pals\/(\w+)\/tools$/))) return reply(200, {});

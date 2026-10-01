@@ -38,6 +38,19 @@ test('a boot with existing PALs reuses the oldest one instead of creating anothe
   assert.ok(!tavus.db.requests.some((r) => r.method === 'POST' && r.path === '/v2/pals'));
 });
 
+test('re-running setup with nothing changed (Tavus answers 304) still succeeds', async (t) => {
+  const tavus = await startFakeTavus();
+  const first = await startServer(env(tavus));
+  await first.get('/api/config');
+  await first.stop();
+  const second = await startServer(env(tavus));
+  t.after(() => Promise.all([second.stop(), tavus.stop()]));
+
+  assert.deepEqual(await (await second.get('/api/config')).json(), { tavusReady: true, needsCode: true });
+  assert.doesNotMatch(second.output(), /Auto-setup failed/);
+  assert.equal(tavus.db.pals.length, 1);
+});
+
 test('a Tavus failure during setup never creates a duplicate PAL', async (t) => {
   const tavus = await startFakeTavus({
     failPalPatch: true,
