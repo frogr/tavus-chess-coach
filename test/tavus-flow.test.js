@@ -6,17 +6,23 @@ const { startServer, startFakeTavus } = require('./helpers');
 
 const CODE = 'open-sesame';
 const KEY = 'abcde-fghjk-mnpqr-stuvw'; // the notebook key a browser would generate
+const COACH_KEYS = ['anna', 'victor', 'helen', 'darius'];
+const config = async (app) => {
+  const c = await (await app.get('/api/config')).json();
+  return { ...c, coaches: c.coaches.map((x) => x.key) };
+};
 const env = (tavus, extra = {}) => ({ TAVUS_API_KEY: 'test-key', TAVUS_API_BASE: tavus.base, ACCESS_CODE: CODE, ...extra });
 
-test('a fresh boot registers 9 tools and one PAL, and config waits for it', async (t) => {
+test('a fresh boot registers 9 tools and a PAL per coach, and config waits for it', async (t) => {
   const tavus = await startFakeTavus();
   const app = await startServer(env(tavus));
   t.after(() => Promise.all([app.stop(), tavus.stop()]));
 
   // Asked immediately after boot: must wait for setup instead of reporting "not configured".
-  assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: true, needsCode: true });
+  assert.deepEqual(await config(app), { tavusReady: true, needsCode: true, coaches: COACH_KEYS });
   assert.equal(tavus.db.tools.length, 9);
-  assert.equal(tavus.db.pals.length, 1);
+  assert.equal(tavus.db.pals.length, 4);
+  assert.equal(new Set(tavus.db.pals.map((p) => p.pal_name)).size, 4);
   assert.match(app.output(), /PAL ready: p\w+/);
   assert.ok(tavus.db.requests.every((r) => r.key === 'test-key'));
 });
@@ -35,8 +41,8 @@ test('a boot with existing PALs reuses the oldest one instead of creating anothe
 
   await app.get('/api/config');
   assert.match(app.output(), /PAL ready: poldest/);
-  assert.equal(tavus.db.pals.length, 3, 'no new PAL created');
-  assert.ok(!tavus.db.requests.some((r) => r.method === 'POST' && r.path === '/v2/pals'));
+  assert.equal(tavus.db.pals.filter((p) => /chess puzzles/.test(p.pal_name)).length, 2, 'no new PAL created for the original coach');
+  assert.equal(tavus.db.pals.length, 6, 'one new PAL for each of the other three coaches');
 });
 
 test('re-running setup with nothing changed (Tavus answers 304) still succeeds', async (t) => {
@@ -47,9 +53,9 @@ test('re-running setup with nothing changed (Tavus answers 304) still succeeds',
   const second = await startServer(env(tavus));
   t.after(() => Promise.all([second.stop(), tavus.stop()]));
 
-  assert.deepEqual(await (await second.get('/api/config')).json(), { tavusReady: true, needsCode: true });
+  assert.deepEqual(await config(second), { tavusReady: true, needsCode: true, coaches: COACH_KEYS });
   assert.doesNotMatch(second.output(), /Auto-setup failed/);
-  assert.equal(tavus.db.pals.length, 1);
+  assert.equal(tavus.db.pals.length, 4, 'a second boot finds every coach by name');
 });
 
 test('a Tavus failure during setup never creates a duplicate PAL', async (t) => {
@@ -60,7 +66,7 @@ test('a Tavus failure during setup never creates a duplicate PAL', async (t) => 
   const app = await startServer(env(tavus));
   t.after(() => Promise.all([app.stop(), tavus.stop()]));
 
-  assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: true });
+  assert.deepEqual(await config(app), { tavusReady: false, needsCode: true, coaches: [] });
   assert.match(app.output(), /Auto-setup failed: Tavus PATCH \/pals\/pexisting -> 500/);
   assert.equal(tavus.db.pals.length, 1);
 });
@@ -89,16 +95,16 @@ test('sessions: access code, conversation creation, ending, and the memory note'
     const res = await app.post('/api/session', { player: '  Sam\nSmith ', key: KEY, code: CODE });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.deepEqual(Object.keys(body).sort(), ['conversation_id', 'conversation_url', 'returning']);
+    assert.deepEqual(Object.keys(body).sort(), ['coach', 'conversation_id', 'conversation_url', 'max_seconds', 'returning']);
     assert.equal(body.returning, false);
     conversationId = body.conversation_id;
     const sent = tavus.db.conversations[0].request;
     assert.equal(sent.pal_id, palId);
     assert.equal(sent.participant_tags.length, 1);
     assert.match(sent.participant_tags[0], /^chess-student-sam-smith-[0-9a-f]{16}$/);
-    assert.match(sent.custom_greeting, /^Hey Sam Smith, I'm Coach Rook/);
+    assert.match(sent.custom_greeting, /^Hey Sam Smith, I'm Anna\. There's a puzzle/);
     assert.match(sent.conversational_context, /The student's name is Sam Smith\./);
-    assert.equal(sent.properties.max_call_duration, 900);
+    assert.equal(sent.properties.max_call_duration, 3600);
   });
 
   await t.test('ending the session ends the conversation and pins a sanitized note', async () => {
@@ -116,7 +122,8 @@ test('sessions: access code, conversation creation, ending, and the memory note'
     assert.equal(body.saved, true);
     assert.match(body.note, /^Session note \d{4}-\d\d-\d\d: fork: tried Nc5 first, 1 hint, then solved it\.$/);
     assert.equal(tavus.db.conversations[0].ended, true);
-    assert.equal(tavus.db.stores.length, 1);
+    assert.equal(tavus.db.stores.length, 4, 'every coach gets the note');
+    assert.ok(tavus.db.stores.every((s) => s.pinned_memories.length === 1));
     assert.equal(tavus.db.stores[0].participant_tag, tavus.db.conversations[0].request.participant_tags[0]);
     assert.equal(tavus.db.stores[0].pinned_memories[0].memory, body.note);
   });

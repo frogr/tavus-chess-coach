@@ -114,12 +114,13 @@ async function showOverview(which) {
   view.replaceChildren(
     sessions.length
       ? table(
-          [['Started'], ['Student'], ['Length'], ['Events', 'num'], ['Errors', 'num'], ['Note saved']],
+          [['Started'], ['Student'], ['Coach'], ['Length'], ['Events', 'num'], ['Errors', 'num'], ['Note saved']],
           sessions.map((s) =>
             row(
               `session?id=${s.conversation_id}`,
               h('td', { class: 'when' }, fmtTime(s.started_at)),
               h('td', {}, s.data.player || '—'),
+              h('td', { class: 'dim' }, s.data.coach || ''),
               h('td', { class: 'when' }, s.ended_at ? fmtLength(s.started_at, s.ended_at) : [h('span', { class: 'live-dot' }), 'live']),
               h('td', { class: 'num' }, String(s.events)),
               h('td', { class: s.errors ? 'num bad' : 'num dim' }, String(s.errors)),
@@ -171,6 +172,28 @@ function boardSummary(summary) {
   return parts.join('\n');
 }
 
+// The same conversation from Tavus's own transcript (delivered by webhook after
+// the call). It has no timestamps, but it does not depend on the browser
+// having reported every event.
+const BOARD_TEXT = /^(\[board\]|Game, move \d|New game against|The game against|At key moment|Game review loaded|New puzzle loaded|A game against you)/;
+function officialLines(transcript) {
+  const lines = [];
+  for (const m of Array.isArray(transcript) ? transcript : []) {
+    const text = typeof m.content === 'string' ? m.content : '';
+    if (m.role === 'assistant') {
+      if (text) lines.push({ cls: 'coach', who: 'Coach', text });
+      for (const c of m.tool_calls || []) {
+        if (!String(c.id).endsWith('_result')) lines.push({ cls: 'tool', who: 'Tool', text: `${c.function?.name}(${c.function?.arguments || ''})` });
+      }
+    } else if (m.role === 'tool') {
+      if (!text.startsWith('dispatched, awaiting result')) lines.push({ cls: 'tool', who: 'Result', text, clamp: true });
+    } else if (m.role === 'user' && text) {
+      lines.push(BOARD_TEXT.test(text) ? { cls: 'board', who: 'Board', text, clamp: true } : { cls: 'student', who: 'Student', text });
+    }
+  }
+  return lines;
+}
+
 // Long text shows three lines; a click opens it.
 const clamped = (tag, text) => h(tag, { class: 'clamp', onclick: (e) => e.currentTarget.classList.toggle('open') }, text);
 
@@ -209,6 +232,25 @@ async function showSession(id, refresh) {
   const json = (label, value, open) =>
     value ? h('details', open ? { open: '' } : {}, h('summary', {}, label), h('pre', {}, typeof value === 'string' ? value : JSON.stringify(value, null, 2))) : null;
   const official = d.transcript || tavus.transcript || (tavus.events || []).find((e) => /transcription_ready/.test(e.event_type || ''))?.properties?.transcript;
+  // Two sources for the transcript: what the browser reported, and Tavus's own.
+  const fromTavus = officialLines(official);
+  const spoken = (list) => list.filter((l) => l.cls === 'coach' || l.cls === 'student').length;
+  const transcript = h('div', {});
+  const sources = h('div', { class: 'filters' });
+  const showLines = (which) => {
+    const list = which === 'Tavus' ? fromTavus : lines;
+    transcript.replaceChildren(
+      ...(list.length
+        ? list.map((l) => h('div', { class: `line from-${l.cls}` }, h('time', {}, l.ts ? fmtClock(l.ts) : ''), h('span', { class: 'who' }, l.who), l.clamp ? clamped('p', l.text) : h('p', {}, l.text)))
+        : [h('p', { class: 'empty' }, 'Empty')])
+    );
+    sources.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.source === which)));
+  };
+  if (fromTavus.length) {
+    for (const [name, list] of [['Browser', lines], ['Tavus', fromTavus]]) {
+      sources.append(h('button', { class: 'quiet small', 'data-source': name, onclick: () => showLines(name) }, name, h('span', { class: 'n' }, String(list.length))));
+    }
+  }
   const perception = d.perception_analysis || (tavus.events || []).find((e) => /perception_analysis/.test(e.event_type || ''))?.properties;
 
   view.replaceChildren(
@@ -229,9 +271,8 @@ async function showSession(id, refresh) {
           'section',
           {},
           h('h2', {}, 'Transcript'),
-          lines.length
-            ? lines.map((l) => h('div', { class: `line from-${l.cls}` }, h('time', {}, fmtClock(l.ts)), h('span', { class: 'who' }, l.who), l.clamp ? clamped('p', l.text) : h('p', {}, l.text)))
-            : h('p', { class: 'empty' }, 'Empty')
+          sources,
+          transcript
         ),
         h('section', {}, h('h2', {}, 'Timeline'), filters, list)
       ),
@@ -242,6 +283,7 @@ async function showSession(id, refresh) {
           'dl',
           { class: 'facts' },
           ...fact('Conversation', s.conversation_id),
+          ...fact('Coach', d.coach),
           ...fact('PAL', d.pal_id),
           ...fact('Memory tag', d.participant_tag),
           ...fact('Returning', d.returning === undefined ? null : d.returning ? 'yes' : 'no'),
@@ -264,6 +306,8 @@ async function showSession(id, refresh) {
     )
   );
   paint('All');
+  // Start on whichever source caught more of what was said.
+  showLines(spoken(fromTavus) > spoken(lines) ? 'Tavus' : 'Browser');
 }
 
 async function showEvents(params) {

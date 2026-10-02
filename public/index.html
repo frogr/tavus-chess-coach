@@ -25,6 +25,8 @@
       <!-- One panel, three states: lobby (before a call), connecting, live. -->
       <div id="stage" class="stage" data-state="lobby">
         <form id="lobby" class="lobby">
+          <div id="coaches" class="coaches" role="radiogroup" aria-label="Coach" hidden></div>
+          <p id="coachStyle" class="muted small coach-style" hidden></p>
           <input id="player" maxlength="40" autocomplete="given-name" placeholder="Your name" aria-label="Your name" />
           <input id="code" type="password" maxlength="60" autocomplete="off" placeholder="Access code" aria-label="Access code" hidden />
           <button id="start" class="primary">Start session</button>
@@ -48,6 +50,7 @@
       <div id="callBar" class="call-bar" hidden>
         <button id="micBtn" class="quiet" aria-pressed="true">Mic</button>
         <button id="camBtn" class="quiet" aria-pressed="true">Camera</button>
+        <span id="callTime" class="call-time" title="Time left in this session"></span>
         <button id="stop" class="danger">End session</button>
       </div>
 
@@ -84,7 +87,13 @@
           <div class="eyebrow" id="pLevel">&nbsp;</div>
           <h1 id="pTitle">&nbsp;</h1>
         </div>
-        <div class="status" id="status" role="status" aria-live="polite"></div>
+        <div class="head-right">
+          <div class="hud puzzle-only" aria-label="Your puzzle score">
+            <span class="stat"><b id="hudRating">800</b> rating <i id="hudDelta" class="delta"></i></span>
+            <span class="stat"><b id="hudStreak">0</b> streak</span>
+          </div>
+          <div class="status" id="status" role="status" aria-live="polite"></div>
+        </div>
       </div>
 
       <form id="gameSetup" class="game-setup play-only">

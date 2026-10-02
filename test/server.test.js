@@ -62,7 +62,7 @@ test('the about page and everything it loads are served', async () => {
 
 test('healthz answers immediately; config reports the coach as off without a key', async () => {
   assert.equal((await (await app.get('/healthz')).json()).ok, true);
-  assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: false });
+  assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: false, coaches: [] });
 });
 
 test('cannot read files outside public/', async () => {

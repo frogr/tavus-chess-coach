@@ -82,6 +82,13 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 
 .lobby { flex-direction: column; gap: 10px; padding: 20px; }
 .lobby .primary { padding: 11px 14px; }
+.coaches { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.coach { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; }
+.coach img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; display: block; filter: saturate(.6) brightness(.8); }
+.coach:hover { background: var(--raised); }
+.coach[aria-checked="true"] { color: var(--text); font-weight: 600; background: var(--raised); border-color: var(--accent); }
+.coach[aria-checked="true"] img, .coach:hover img { filter: none; }
+.coach-style { margin: -2px 0 4px; }
 .lobby .error:empty { display: none; }
 
 .connecting { position: absolute; inset: 0; place-content: center; justify-items: center; gap: 14px; color: var(--muted); }
@@ -98,7 +105,9 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .stage-note:empty { display: none; }
 
 .call-bar { display: flex; gap: 8px; }
-.call-bar .danger { margin-left: auto; }
+.call-bar { align-items: center; }
+.call-time { margin-left: auto; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.call-time.low { color: var(--bad); }
 
 /* notebook */
 .notebook { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
@@ -125,6 +134,16 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .eyebrow { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
 h1 { font-size: 21px; margin-top: 2px; }
 .status { font-weight: 600; font-size: 14px; text-align: right; }
+.head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.hud { display: flex; gap: 14px; font-size: 12.5px; color: var(--dim); }
+.hud .stat { position: relative; }
+.hud b { font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; margin-right: 2px; }
+.hud .stat.hot b { color: #f2c14e; }
+.delta { position: absolute; left: 0; top: -2px; font-style: normal; font-weight: 700; font-size: 13px; opacity: 0; pointer-events: none; }
+.delta.up { color: var(--good); }
+.delta.down { color: var(--bad); }
+.delta.show { animation: delta 1.6s ease-out; }
+@keyframes delta { 0% { opacity: 0; transform: translateY(0); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-22px); } }
 .status.good { color: var(--good); }
 .status.bad { color: var(--bad); }
 

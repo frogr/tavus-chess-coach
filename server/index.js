@@ -12,6 +12,7 @@ const { tavus } = require('./tavus');
 const { nextPuzzle } = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
 const { playTurn, levelFor } = require('./play');
+const { COACHES, coachFor } = require('./coaches');
 const { cleanName, participantTag, getMemory, recordSession } = require('./memory');
 const { httpError } = require('./errors');
 const { createLimiter } = require('./limits');
@@ -75,34 +76,46 @@ function budget(limiter, ip, what) {
 }
 
 // ---------------------------------------------------------------- PAL config
-let bootPalId = null; // set by auto-setup when there's no .tavus.json (fresh deploys)
+let bootPals = null; // set by auto-setup when there's no .tavus.json (fresh deploys): { pal_id, pals }
 let setupRunning = null;
 let lastSetupAttempt = 0;
 
 function tavusConfig() {
-  if (bootPalId && !process.env.TAVUS_PAL_ID) return { pal_id: bootPalId };
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    return { ...cfg, pal_id: process.env.TAVUS_PAL_ID || cfg.pal_id };
-  } catch {
-    return { pal_id: process.env.TAVUS_PAL_ID || null };
+  let cfg = {};
+  if (bootPals) cfg = bootPals;
+  else {
+    try {
+      cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    } catch {}
   }
+  const palId = process.env.TAVUS_PAL_ID || cfg.pal_id || null;
+  // Every coach's PAL by key. The first coach is the original PAL.
+  return { ...cfg, pal_id: palId, pals: { ...(cfg.pals || {}), ...(palId ? { [COACHES[0].key]: palId } : {}) } };
+}
+
+// A coach is offered once its PAL exists.
+const availableCoaches = (cfg = tavusConfig()) => COACHES.filter((c) => cfg.pals[c.key]);
+// The coach a request asked for, falling back to the first; with its PAL ID.
+function pickCoach(key, cfg) {
+  const coach = coachFor(typeof key === 'string' ? key : '');
+  return cfg.pals[coach.key] ? { coach, palId: cfg.pals[coach.key] } : { coach: COACHES[0], palId: cfg.pal_id };
 }
 
 // On a fresh deploy the server registers the PAL itself. Requests that need
 // the PAL wait for a setup that is in flight, and a failed setup is retried
 // (at most every 30s) instead of leaving the coach off until the next restart.
 function ensurePal() {
-  if (!process.env.TAVUS_API_KEY || process.env.AUTO_SETUP === '0' || tavusConfig().pal_id) return Promise.resolve();
+  if (!process.env.TAVUS_API_KEY || process.env.AUTO_SETUP === '0' || availableCoaches().length === COACHES.length) return Promise.resolve();
   if (setupRunning) return setupRunning;
   if (Date.now() - lastSetupAttempt < 30000) return Promise.resolve();
   lastSetupAttempt = Date.now();
-  console.log('  No PAL configured, running setup…');
+  console.log('  Coaches not all configured, running setup…');
   setupRunning = require('./setup')
     .ensureSetup()
-    .then((id) => {
-      bootPalId = id;
-      console.log(`  PAL ready: ${id}`);
+    .then((result) => {
+      bootPals = result;
+      console.log(`  PAL ready: ${result.pal_id}`);
+      console.log(`  Coaches: ${Object.keys(result.pals).join(', ')}`);
     })
     .catch((e) => console.error(`  Auto-setup failed: ${e.message}`))
     .finally(() => {
@@ -228,6 +241,9 @@ function requirePal() {
   return cfg;
 }
 
+// How long one video session may run. Tavus ends the call at this point (its own ceiling is an hour).
+const MAX_CALL_SECONDS = Math.max(60, Math.min(3600, Number(process.env.MAX_CALL_SECONDS) || 3600));
+
 const OPENERS = {
   puzzle: { greeting: "There's a puzzle on the board. Take a look and tell me what jumps out at you.", first: 'get them started on the puzzle on the board.' },
   play: { greeting: "Up for a game? Pick a strength and I'll play you.", first: 'offer them a game against you; they pick your strength on the board, or you can start one with chess_new_game.' },
@@ -241,7 +257,9 @@ const routes = {
   'GET /api/config': async () => {
     await palSettled();
     const cfg = tavusConfig();
-    return { tavusReady: Boolean(process.env.TAVUS_API_KEY && cfg.pal_id), needsCode: Boolean(ACCESS_CODE) };
+    const tavusReady = Boolean(process.env.TAVUS_API_KEY && cfg.pal_id);
+    const coaches = tavusReady ? availableCoaches(cfg).map((c) => ({ key: c.key, name: c.name, style: c.style, image: `/coaches/${c.key}.jpg` })) : [];
+    return { tavusReady, needsCode: Boolean(ACCESS_CODE), coaches };
   },
 
   // A fresh puzzle: by level, optionally by theme, avoiding ones this student has seen.
@@ -313,11 +331,12 @@ const routes = {
     return playTurn(fen, move || null, rating);
   },
 
-  'POST /api/session': async ({ player, key, code, mode }, { ip, clientId }) => {
+  'POST /api/session': async ({ player, key, code, mode, coach: coachKey }, { ip, clientId }) => {
     checkCode(code, ip);
     budget(limits.session, ip, 'sessions');
     await palSettled();
     const cfg = requirePal();
+    const { coach, palId } = pickCoach(coachKey, cfg);
     const name = cleanName(player) || null;
     const tag = participantTag(name, key);
 
@@ -326,7 +345,7 @@ const routes = {
     // memories plus its learned memory; putting the latest notes in the
     // conversational context makes the generated greeting use them.)
     let notes = [];
-    if (tag) notes = (await getMemory(cfg.pal_id, name, key).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
+    if (tag) notes = (await getMemory(palId, name, key).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
     const recent = notes.filter((n) => n.startsWith('Session note')).slice(-3);
     const returning = recent.length > 0;
 
@@ -343,29 +362,29 @@ const routes = {
           : null,
     ].filter(Boolean).join(' ');
 
-    const greeting = returning ? null : `Hey${name ? ` ${name}` : ''}, I'm Coach Rook. ${opener.greeting}`;
+    const greeting = returning ? null : `Hey${name ? ` ${name}` : ''}, I'm ${coach.name}. ${opener.greeting}`;
     const convo = await tavus('POST', '/conversations', {
-      pal_id: cfg.pal_id,
+      pal_id: palId,
       // Tavus posts conversation events (transcript, perception analysis, shutdown) here for the audit log.
       ...(PUBLIC_URL ? { callback_url: `${PUBLIC_URL}/api/tavus/webhook/${WEBHOOK_TOKEN}` } : {}),
       conversation_name: `Chess coaching${name ? ` with ${name}` : ''}`,
-      // Same tag -> same memory store, so Coach Rook remembers this student next time.
+      // Same tag -> same memory store, so the coach remembers this student next time.
       ...(tag ? { participant_tags: [tag] } : {}),
       conversational_context: context || undefined,
       ...(returning
         ? { dynamic_greeting: true } // generated from the context above, so it can reference last time
         : { custom_greeting: greeting }),
       properties: {
-        max_call_duration: 900,
+        max_call_duration: MAX_CALL_SECONDS,
         participant_left_timeout: 20,
         participant_absent_timeout: 120,
         enable_closed_captions: true,
       },
     });
     await audit.session(convo.conversation_id, {
-      data: { player: name, participant_tag: tag, pal_id: cfg.pal_id, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent },
+      data: { player: name, coach: coach.key, participant_tag: tag, pal_id: palId, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent },
     });
-    return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning };
+    return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning, max_seconds: MAX_CALL_SECONDS, coach: coach.key };
   },
 
   // End the call and write what happened on the board into the student's memory.
@@ -379,11 +398,14 @@ const routes = {
     const name = cleanName(player);
     let result = { saved: false };
     if (name && summary) {
+      // Every coach gets the note, so switching coach does not lose what happened on the board.
+      const palIds = [...new Set([cfg.pal_id, ...Object.values(cfg.pals)])];
       result = await recordSession(cfg.pal_id, name, key, summary).catch((e) => {
         if (e.expose) throw e;
         console.error(`session note not saved: ${e.message}`);
         return { saved: false, reason: 'the memory service returned an error' };
       });
+      if (result.saved) for (const other of palIds.slice(1)) await recordSession(other, name, key, summary).catch(() => {});
     }
     if (valid) {
       await audit.session(conversation_id, { ended_at: new Date().toISOString(), data: { summary: summary || null, note: result.note || null, note_saved: result.saved } });
@@ -394,11 +416,11 @@ const routes = {
   },
 
   // What Coach Rook remembers about a student (pinned notes + Tavus learned memory).
-  'POST /api/memory': async ({ player, key, code }, { ip }) => {
+  'POST /api/memory': async ({ player, key, code, coach: coachKey }, { ip }) => {
     checkCode(code, ip);
     await palSettled();
     const cfg = requirePal();
-    return getMemory(cfg.pal_id, cleanName(player), key);
+    return getMemory(pickCoach(coachKey, cfg).palId, cleanName(player), key);
   },
 };
 
@@ -408,7 +430,7 @@ routes['POST /api/events'] = async ({ client, events }, { ip }) => {
   budget(limits.events, ip, 'event reports');
   const clientId = typeof client === 'string' && /^[a-z0-9-]{8,64}$/i.test(client) ? client : null;
   if (!clientId || !Array.isArray(events)) throw httpError(400, 'Malformed event report.');
-  for (const e of events.slice(0, 100)) {
+  for (const e of events.slice(0, 500)) {
     if (!e || typeof e.kind !== 'string') continue;
     const t = Number(e.t);
     audit.record({
@@ -558,7 +580,8 @@ async function handle(req, res) {
   let body = {};
   try {
     budget(limits.api, ctx.ip, 'requests');
-    if (req.method === 'POST') body = await readBody(req, webhook ? 4000000 : MAX_BODY); // transcripts are long
+    // Transcripts are long, and so is a batch of browser events while the coach is talking.
+    if (req.method === 'POST') body = await readBody(req, webhook ? 4000000 : pathname === '/api/events' ? 2000000 : MAX_BODY);
     const result = await handler(body, ctx);
     send(res, 200, result);
     logRequest(req, pathname, ctx, body, 200, started, result);

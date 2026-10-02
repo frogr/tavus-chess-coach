@@ -1,17 +1,17 @@
-// Registers the coach's tools and PAL with Tavus and writes their IDs to
+// Registers the tools and one PAL per coach with Tavus and writes their IDs to
 // .tavus.json. Runs from `npm run setup`, and automatically on server boot when
 // no PAL is configured (e.g. a fresh Render deploy).
 //
-// Idempotent: tools are matched by name and patched, and the PAL is found by
+// Idempotent: tools are matched by name and patched, and each PAL is found by
 // ID or by name and patched, so it never piles up duplicates.
 require('./env');
 const fs = require('fs');
 const path = require('path');
 const { tavus } = require('./tavus');
-const { TOOLS, SYSTEM_PROMPT, GREETING } = require('./pal-config');
+const { TOOLS, systemPrompt, greeting } = require('./pal-config');
+const { COACHES } = require('./coaches');
 
 const CONFIG_PATH = process.env.TAVUS_CONFIG_PATH || path.join(__dirname, '..', '.tavus.json');
-const FACE_ID = process.env.TAVUS_FACE_ID || 'rc9cff32ceba'; // stock "Anna" face
 
 function readConfig() {
   try {
@@ -35,13 +35,13 @@ async function upsertTool(tool) {
   return created.tool_id;
 }
 
-function palBody() {
+function palBody(coach) {
   return {
-    pal_name: PAL_NAME,
-    system_prompt: SYSTEM_PROMPT,
-    greeting: GREETING,
+    pal_name: coach.pal_name,
+    system_prompt: systemPrompt(coach),
+    greeting: greeting(coach),
     pipeline_mode: 'full',
-    default_face_id: FACE_ID,
+    default_face_id: coach.face_id,
     layers: {
       perception: { perception_model: 'raven-1' },
       conversational_flow: {
@@ -61,39 +61,36 @@ function palBody() {
   };
 }
 
-const PAL_NAME = 'Coach Rook (chess puzzles)';
 const nameKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 // A failed lookup throws rather than reporting "not found": treating an API
 // hiccup as "no PAL yet" is how duplicates get created.
-async function findPalByName() {
-  const hits = [];
+async function listPals() {
+  const all = [];
   for (let page = 1; page <= 5; page++) {
     const res = await tavus('GET', `/pals?limit=100&page=${page}&pal_type=user`);
-    // Tavus strips punctuation from stored names, so compare letters and digits only.
-    hits.push(...(res.data || []).filter((p) => nameKey(p.pal_name) === nameKey(PAL_NAME)));
+    all.push(...(res.data || []));
     if (!res.data || res.data.length < 100) break;
   }
+  return all;
+}
+
+function findPalByName(pals, name) {
+  // Tavus strips punctuation from stored names, so compare letters and digits only.
+  const hits = pals.filter((p) => nameKey(p.pal_name) === nameKey(name));
   // If there are several, always settle on the oldest so student memory (stored per PAL) stays put.
   hits.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   return hits.length ? hits[0].pal_id : null;
 }
 
-async function ensureSetup() {
-  const config = readConfig();
-
-  console.log('Tools:');
-  const toolIds = [];
-  for (const tool of TOOLS) toolIds.push(await upsertTool(tool));
-
-  console.log('PAL:');
-  let palId = process.env.TAVUS_PAL_ID || config.pal_id || (await findPalByName());
+// Creates or updates one coach's PAL and returns its ID.
+async function upsertPal(coach, known, toolIds) {
+  let palId = known;
   if (palId) {
     try {
-      const body = palBody();
-      const ops = Object.entries(body).map(([k, v]) => ({ op: 'replace', path: `/${k}`, value: v }));
+      const ops = Object.entries(palBody(coach)).map(([k, v]) => ({ op: 'replace', path: `/${k}`, value: v }));
       await tavus('PATCH', `/pals/${palId}`, ops);
-      console.log(`  updated PAL ${palId}`);
+      console.log(`  updated PAL ${palId} (${coach.name})`);
     } catch (e) {
       // Only a PAL that no longer exists is replaced; any other failure is surfaced.
       if (e.status !== 404) throw e;
@@ -102,30 +99,49 @@ async function ensureSetup() {
     }
   }
   if (!palId) {
-    const created = await tavus('POST', '/pals', palBody());
+    const created = await tavus('POST', '/pals', palBody(coach));
     palId = created.pal_id;
-    console.log(`  created PAL ${palId}`);
+    console.log(`  created PAL ${palId} (${coach.name})`);
   }
-
   const attached = await tavus('GET', `/pals/${palId}/tools`).catch(() => ({}));
   const attachedIds = new Set((attached.data || attached.tools || []).map((t) => t.tool_id));
   const missing = toolIds.filter((id) => !attachedIds.has(id));
   if (missing.length) await tavus('POST', `/pals/${palId}/tools`, { tool_ids: missing });
   console.log(`  ${toolIds.length} tools attached (${missing.length} new)`);
+  return palId;
+}
+
+// Resolves to { pal_id, pals }: the first coach's PAL, and every coach's PAL by key.
+async function ensureSetup() {
+  const config = readConfig();
+
+  console.log('Tools:');
+  const toolIds = [];
+  for (const tool of TOOLS) toolIds.push(await upsertTool(tool));
+
+  console.log('PALs:');
+  let existing = null; // listed once, and only if a coach has no known ID
+  const pals = {};
+  for (const [i, coach] of COACHES.entries()) {
+    let known = (i === 0 && (process.env.TAVUS_PAL_ID || config.pal_id)) || config.pals?.[coach.key];
+    if (!known) known = findPalByName((existing ||= await listPals()), coach.pal_name);
+    pals[coach.key] = await upsertPal(coach, known, toolIds);
+  }
+  const palId = pals[COACHES[0].key];
 
   try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify({ pal_id: palId, face_id: FACE_ID, tool_ids: toolIds }, null, 2));
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify({ pal_id: palId, pals, tool_ids: toolIds }, null, 2));
   } catch {
-    // read-only filesystem: the caller keeps the ID in memory
+    // read-only filesystem: the caller keeps the IDs in memory
   }
-  return palId;
+  return { pal_id: palId, pals };
 }
 
 module.exports = { ensureSetup };
 
 if (require.main === module) {
   ensureSetup()
-    .then((id) => console.log(`\nPAL ready: ${id}. Now run: npm start`))
+    .then(({ pal_id, pals }) => console.log(`\nPAL ready: ${pal_id}. Coaches: ${Object.keys(pals).join(', ')}. Now run: npm start`))
     .catch((e) => {
       console.error(e.message);
       process.exit(1);

@@ -67,25 +67,53 @@ function seenPuzzles() {
 function markSeen(id) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seenPuzzles().filter((x) => x !== id), id].slice(-500))); } catch {}
 }
-function storedLevel() {
-  try { return Math.max(1, Math.min(3, Number(localStorage.getItem('coach-rook-level')) || 1)); } catch { return 1; }
+// ---------------------------------------------------------------- puzzle rating
+// Puzzles are scored like a rated game against the puzzle (Elo, K = 40): a
+// clean solve is a win, a solve that needed wrong tries or hints is a draw,
+// giving up is a loss. The rating picks the level of the next puzzle, and a
+// run of clean solves is a streak.
+const LEVEL_FLOORS = [0, 1000, 1400]; // the pool's three levels start at these puzzle ratings
+const levelForRating = (r) => (r >= LEVEL_FLOORS[2] ? 3 : r >= LEVEL_FLOORS[1] ? 2 : 1);
+
+function loadScore() {
+  try {
+    const s = JSON.parse(localStorage.getItem('coach-rook-score') || '{}');
+    state.rating = Number.isFinite(s.rating) ? Math.max(400, Math.min(2400, s.rating)) : 800;
+    state.streak = Number.isFinite(s.streak) ? Math.max(0, s.streak) : 0;
+    state.best = Number.isFinite(s.best) ? Math.max(0, s.best) : 0;
+  } catch {
+    state.rating = 800;
+    state.streak = state.best = 0;
+  }
 }
 
-// Difficulty follows the student: two clean solves in a row moves up a level,
-// giving up or two wrong tries moves down.
-function adaptLevel() {
+function renderScore(delta) {
+  $('hudRating').textContent = state.rating;
+  $('hudStreak').textContent = state.streak;
+  $('hudStreak').parentElement.classList.toggle('hot', state.streak >= 3);
+  if (delta === undefined) return;
+  const d = $('hudDelta');
+  d.textContent = `${delta >= 0 ? '+' : '−'}${Math.abs(delta)}`;
+  d.className = `delta ${delta >= 0 ? 'up' : 'down'}`;
+  // Restart the animation even when two results land in a row.
+  void d.offsetWidth;
+  d.classList.add('show');
+}
+
+// Scores the puzzle on the board, once. Returns what changed, or null if it was already scored.
+function ratePuzzle(score) {
   const c = state.current;
-  if (!c) return;
-  if (c.gaveUp || c.wrong.length >= 2) {
-    state.level = Math.max(1, state.level - 1);
-    state.streak = 0;
-  } else if (c.solved && !c.wrong.length && !c.hints) {
-    state.streak = (state.streak || 0) + 1;
-    if (state.streak >= 2) {
-      state.level = Math.min(3, state.level + 1);
-      state.streak = 0;
-    }
-  } else state.streak = 0;
+  if (!c || c.rated) return null;
+  c.rated = true;
+  const before = state.rating;
+  const expected = 1 / (1 + 10 ** ((puzzle().rating - before) / 400));
+  state.rating = Math.max(400, Math.min(2400, Math.round(before + 40 * (score - expected))));
+  state.streak = score === 1 ? state.streak + 1 : 0;
+  state.best = Math.max(state.best, state.streak);
+  try { localStorage.setItem('coach-rook-score', JSON.stringify({ rating: state.rating, streak: state.streak, best: state.best })); } catch {}
+  renderScore(state.rating - before);
+  audit('puzzle.rated', { id: puzzle().id, score, before, after: state.rating, streak: state.streak });
+  return { before, after: state.rating, streak: state.streak };
 }
 
 // Every time the board is pointed at a new position (puzzle, review ply, key
@@ -117,19 +145,36 @@ const CLIENT_ID = crypto.randomUUID(); // one per page load
 const auditQueue = [];
 let auditTimer = null;
 
+const AUDIT_BATCH = 200; // events per report
+const AUDIT_BACKLOG = 5000; // kept while reports are failing; beyond this the oldest go
+
 function audit(kind, data) {
   auditQueue.push({ t: Date.now(), kind, conversation_id: state.conversationId || undefined, data });
-  if (auditQueue.length >= 40) flushAudit();
-  else auditTimer ||= setTimeout(flushAudit, 1500);
+  if (auditQueue.length > AUDIT_BACKLOG) auditQueue.splice(0, auditQueue.length - AUDIT_BACKLOG);
+  auditTimer ||= setTimeout(flushAudit, 2000);
 }
 
-function flushAudit(beacon = false) {
+// Reports go out on a timer, never per event: a talking coach produces dozens
+// of events a second, and a report per burst runs into the server's rate
+// limit. A report that fails is put back and sent again with the next one.
+async function flushAudit(beacon = false) {
   clearTimeout(auditTimer);
   auditTimer = null;
   if (!auditQueue.length) return;
-  const body = JSON.stringify({ client: CLIENT_ID, events: auditQueue.splice(0) });
-  if (beacon && navigator.sendBeacon) navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }));
-  else fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  const events = auditQueue.splice(0, AUDIT_BATCH);
+  const body = JSON.stringify({ client: CLIENT_ID, events });
+  if (beacon) {
+    // The page is going away: hand the browser what fits in a beacon.
+    navigator.sendBeacon?.('/api/events', new Blob([body], { type: 'application/json' }));
+    return;
+  }
+  try {
+    const res = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (!res.ok && res.status !== 400 && res.status !== 413) throw new Error(String(res.status));
+  } catch {
+    auditQueue.unshift(...events);
+  }
+  if (auditQueue.length) auditTimer ||= setTimeout(flushAudit, auditQueue.length >= AUDIT_BATCH ? 600 : 2000);
 }
 
 // ---------------------------------------------------------------- notebook key
@@ -238,16 +283,16 @@ function sideName(color) {
 async function loadPuzzle(request = { which: 'next' }, { announce = true } = {}) {
   let note = '';
   if (request.which !== 'retry' || !state.puzzle) {
-    if (request.which === 'next') adaptLevel();
-    const res = await api('/api/puzzle', { which: request.which, theme: request.theme, level: state.level, lastTheme: state.puzzle?.theme, seen: seenPuzzles() });
+    // Walking away from a puzzle after wrong tries counts as a loss.
+    if (state.puzzle && !state.solved && state.current?.wrong.length) ratePuzzle(0);
+    const level = request.which === 'next' || !state.puzzle ? levelForRating(state.rating) : state.puzzle.level;
+    const res = await api('/api/puzzle', { which: request.which, theme: request.theme, level, lastTheme: state.puzzle?.theme, seen: seenPuzzles() });
     if (res.error) return { error: res.error };
     note = res.note || '';
     state.puzzle = res.puzzle;
-    state.level = res.puzzle.level;
     state.count = (state.count || 0) + 1;
     state.current = { wrong: [], hints: 0, solved: false, gaveUp: false };
     markSeen(res.puzzle.id);
-    try { localStorage.setItem('coach-rook-level', String(state.level)); } catch {}
   }
   setMode('puzzle');
   newPosition();
@@ -265,7 +310,7 @@ async function loadPuzzle(request = { which: 'next' }, { announce = true } = {})
   audit('puzzle.load', { id: p.id, theme: p.theme, level: p.level, rating: p.rating, fen: p.fen, which: request.which });
   // The theme stays hidden until it's solved: naming it would give the answer away.
   $('pTitle').textContent = `${sideName(state.chess.turn())} to move`;
-  $('pLevel').textContent = `Puzzle ${state.count} · ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
+  $('pLevel').textContent = `Puzzle ${state.count} · rated ${p.rating}`;
   setStatus('');
   render();
   const context = (note ? note + ' ' : '') + (await puzzleContext(p));
@@ -339,11 +384,14 @@ async function playerMove(from, to, promotion = 'q') {
   if (state.chess.isCheckmate() || state.ply >= p.line.length) {
     state.solved = true;
     tally((t) => (t.solved = true));
+    const c = state.current;
+    const rated = ratePuzzle(!c.wrong.length && !c.hints ? 1 : 0.5);
     setStatus(`Solved · ${p.theme}`, 'good');
     audit('puzzle.solved', { id: p.id, theme: p.theme, wrong: state.current?.wrong, hints: state.current?.hints });
     setTimeout(() => sounds.play('great'), 260);
     sendRespond(
       `[board] ${who} played ${move.san} (${moveWords}). Correct, and that SOLVES the puzzle (theme: ${p.theme}). ` +
+        (rated ? `Their puzzle rating went from ${rated.before} to ${rated.after}${rated.streak >= 2 ? `, and that is ${rated.streak} clean solves in a row` : ''}. ` : '') +
         `Celebrate specifically, name the pattern so it sticks, then offer the next puzzle.`
     );
     return;
@@ -384,6 +432,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function playSolution() {
   const p = puzzle();
   tally((t) => !t.solved && (t.gaveUp = true));
+  ratePuzzle(0);
   const gen = newPosition();
   state.busy = true;
   state.selected = null;
@@ -558,14 +607,16 @@ function gotoMoment(n) {
   state.badge = null;
   audit('review.moment', { moment: k.index, ply: k.ply, played: m.san });
   state.chess = new Chess(m.fenBefore);
+  // The move they played in the game is drawn on the board; the better move is not.
+  state.arrows = [[m.uci.slice(0, 2), m.uci.slice(2, 4)]];
   state.lastMove = prev ? { from: prev.uci.slice(0, 2), to: prev.uci.slice(2, 4) } : null;
   setStatus(`You played ${m.san}`, '');
   document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === k.ply - 1));
   render();
   return (
     `Board now shows key moment ${k.index}, the position BEFORE the student's move ${moveLabel(m)}. ` +
-    `${k.text} The student can now move pieces to try a better move. Ask what they were thinking, then let them look; ` +
-    `don't say the engine's move unless they give up.`
+    `${k.text} The move they played is drawn as an arrow. The student can now move pieces to try a better move. Ask what they were thinking, then let them look; ` +
+    `don't say the engine's move unless they give up. When you mention a piece or a square, point at it with chess_show_on_board.`
   );
 }
 
@@ -575,6 +626,7 @@ async function reviewTry(from, to, promotion = 'q') {
   state.lastMove = move;
   state.busy = true;
   state.badge = null;
+  state.arrows = [];
   const gen = generation;
   moveSound(move.san);
   render();
@@ -677,7 +729,10 @@ async function showPuzzleEngineLine() {
   const a = await api('/api/analyze', { fen: state.chess.fen() });
   const line = a.best ? a.best.san.slice(0, 4) : [];
   if (!line.length) return 'There is no engine line to show here: the position on the board is already finished.';
-  if (state.mode === 'puzzle') tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
+  if (state.mode === 'puzzle') {
+    tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
+    if (!state.solved) ratePuzzle(0);
+  }
   const before = { chess: state.chess, lastMove: state.lastMove };
   setStatus(line.join(' '), '');
   const played = await animateLine(before.chess.fen(), line);
@@ -737,7 +792,7 @@ const costliest = (g) => [...g.mistakes].sort((a, b) => b.loss - a.loss).slice(0
 
 function renderGame() {
   const g = state.game;
-  $('pLevel').textContent = g ? `vs Coach Rook · ${g.rating}` : 'vs Coach Rook';
+  $('pLevel').textContent = g ? `vs ${coachName()} · ${g.rating}` : `vs ${coachName()}`;
   if (!g) {
     $('pTitle').textContent = 'Play the coach';
     setStatus('');
@@ -965,9 +1020,9 @@ async function reviewPlayedGame({ announce = true } = {}) {
   if (!g || g.sans.length < 2) return 'There is no game to review yet.';
   if (!g.over) finishGame(g, 'unfinished', 'Game stopped');
   const you = state.player || 'Student';
-  g.chess.header('Event', `Game against Coach Rook (${g.rating})`);
-  g.chess.header('White', g.color === 'w' ? you : 'Coach Rook');
-  g.chess.header('Black', g.color === 'b' ? you : 'Coach Rook');
+  g.chess.header('Event', `Game against ${coachName()} (${g.rating})`);
+  g.chess.header('White', g.color === 'w' ? you : coachName());
+  g.chess.header('Black', g.color === 'b' ? you : coachName());
   g.chess.header('Result', { won: g.color === 'w' ? '1-0' : '0-1', lost: g.color === 'w' ? '0-1' : '1-0', drew: '1/2-1/2', unfinished: '*' }[g.result]);
   const review = await loadReview(g.chess.pgn(), g.color, { announce });
   if (!review) return 'The game could not be analyzed.';
@@ -997,8 +1052,9 @@ const TOOL_HANDLERS = {
 
   async chess_show_on_board(args) {
     if (state.mode === 'puzzle') tally((t) => !t.solved && (t.hints += 1));
-    const squares = (args.squares || []).filter((s) => /^[a-h][1-8]$/.test(s));
-    const arrows = (args.arrows || [])
+    const list = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,;\s]+/) : []);
+    const squares = list(args.squares).map((s) => String(s).trim().toLowerCase()).filter((s) => /^[a-h][1-8]$/.test(s));
+    const arrows = (Array.isArray(args.arrows) ? args.arrows : typeof args.arrows === 'string' ? args.arrows.split(/[,;]+/) : [])
       .map((a) => String(a).toLowerCase().match(/([a-h][1-8]).*?([a-h][1-8])/))
       .filter(Boolean)
       .map((m) => [m[1], m[2]]);
@@ -1161,6 +1217,20 @@ function onTrackStopped(ev) {
   if (ev.participant?.local && ev.track?.kind === 'video') $('selfVideo').classList.add('off');
 }
 
+// Time left in the session, shown in the call bar. Tavus ends the call when it runs out.
+function startCallClock(seconds) {
+  clearInterval(state.clock);
+  if (!seconds) return ($('callTime').textContent = '');
+  state.callEnds = Date.now() + seconds * 1000;
+  const tick = () => {
+    const left = Math.max(0, Math.round((state.callEnds - Date.now()) / 1000));
+    $('callTime').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    $('callTime').classList.toggle('low', left <= 120);
+  };
+  tick();
+  state.clock = setInterval(tick, 1000);
+}
+
 function syncCallButtons() {
   const call = state.call;
   if (!call) return;
@@ -1184,7 +1254,7 @@ async function startSession() {
   const cancelled = () => state.attempt !== attempt;
   try {
     if (!window.Daily) throw new Error('Video failed to load. Reload the page.');
-    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim(), mode: state.mode });
+    const { conversation_id, conversation_url, returning, max_seconds } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim(), mode: state.mode, coach: state.coach?.key });
     created = conversation_id;
     if (cancelled()) throw new Error('Cancelled.');
     state.conversationId = conversation_id;
@@ -1215,7 +1285,8 @@ async function startSession() {
     call.on('participant-left', (ev) => {
       if (ev.participant?.local) return;
       audit('call.coach_left', { reason: ev.reason });
-      endSession(); // the coach hung up (time limit or timeout): the session is over
+      const timedOut = state.callEnds && state.callEnds - Date.now() < 15000;
+      endSession().then(() => timedOut && ($('lobbyError').textContent = 'Session time limit reached.')); // the coach hung up: the session is over
     });
     // Joining waits on the browser's microphone prompt; don't wait forever.
     let timer;
@@ -1226,6 +1297,7 @@ async function startSession() {
     await Promise.race([call.join(options), timeout]).finally(() => clearTimeout(timer));
     if (cancelled()) throw new Error('Cancelled.');
     audit('call.joined', { conversation_id });
+    startCallClock(max_seconds);
     setStage('live');
     syncCallButtons();
   } catch (e) {
@@ -1267,6 +1339,8 @@ window.addEventListener('pagehide', () => {
 });
 
 async function endSession() {
+  clearInterval(state.clock);
+  state.callEnds = null;
   const id = state.conversationId;
   state.conversationId = null;
   if (state.call) {
@@ -1303,7 +1377,7 @@ async function loadNotebook() {
     return;
   }
   try {
-    const mem = await api('/api/memory', { player: name, key: notebookKey(), code });
+    const mem = await api('/api/memory', { player: name, key: notebookKey(), code, coach: state.coach?.key });
     box.hidden = false;
     $('nbName').textContent = name;
     $('nbKey').textContent = formatKey(notebookKey());
@@ -1340,6 +1414,43 @@ function learnedLines(learned) {
   const recent = learned.timeline?.recent_conversations;
   if (Array.isArray(recent)) recent.slice(-2).forEach((c) => c?.summary && out.push(c.summary));
   return out;
+}
+
+// ---------------------------------------------------------------- coach picker
+const coachName = () => state.coach?.name || 'the coach';
+
+function chooseCoach(key) {
+  state.coach = state.coaches.find((c) => c.key === key) || state.coaches[0] || null;
+  if (!state.coach) return;
+  try { localStorage.setItem('coach-rook-coach', state.coach.key); } catch {}
+  for (const b of $('coaches').children) b.setAttribute('aria-checked', String(b.dataset.coach === state.coach.key));
+  $('coachStyle').textContent = state.coach.style;
+  if (state.mode === 'play') renderGame();
+}
+
+function setupCoaches(coaches) {
+  state.coaches = coaches || [];
+  const many = state.coaches.length > 1;
+  $('coaches').hidden = $('coachStyle').hidden = !many;
+  for (const c of state.coaches) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'coach';
+    b.dataset.coach = c.key;
+    b.setAttribute('role', 'radio');
+    const img = document.createElement('img');
+    img.src = c.image;
+    img.alt = '';
+    b.append(img, c.name);
+    b.addEventListener('click', () => {
+      chooseCoach(c.key);
+      loadNotebook();
+    });
+    $('coaches').append(b);
+  }
+  let stored = null;
+  try { stored = localStorage.getItem('coach-rook-coach'); } catch {}
+  chooseCoach(stored);
 }
 
 // ---------------------------------------------------------------- simulator
@@ -1393,7 +1504,8 @@ async function boot() {
   $('hoodClose').addEventListener('click', () => setHood(false));
   if (SIM) setupSim();
 
-  state.level = storedLevel();
+  loadScore();
+  renderScore();
   await loadPuzzle({ which: 'next' }, { announce: false });
   $('retry').addEventListener('click', () => loadPuzzle({ which: 'retry' }));
   $('next').addEventListener('click', () => loadPuzzle({ which: 'next' }));
@@ -1472,6 +1584,7 @@ async function boot() {
   const cfg = await api('/api/config');
   state.tavusReady = cfg.tavusReady;
   $('code').hidden = !cfg.needsCode;
+  setupCoaches(cfg.coaches);
   try { $('code').value = localStorage.getItem('coach-rook-code') || ''; } catch {}
   const refresh = () => {
     try { localStorage.setItem('coach-rook-code', $('code').value.trim()); } catch {}
