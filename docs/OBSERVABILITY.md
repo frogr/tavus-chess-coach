@@ -36,6 +36,7 @@ All in the Postgres database named by `DATABASE_URL`.
 | Everything the coach said | `tavus.received` (`conversation.utterance`, role `replica`) and the transcript | `audit_events`; `audit_sessions.data.transcript` |
 | Every tool call, with its arguments | `tavus.received` (`conversation.tool_call`) and `feed:tool_call → <name>` | `audit_events` |
 | What each tool returned to the coach | `feed:tool_result ← <name>` and `tavus.sent` (`conversation.tool_result`) | `audit_events` |
+| Each utterance as it was spoken, word by word, with whether it was interrupted | `tavus.received` (`conversation.utterance.streaming`) | `audit_events` |
 | Which model answered, and when it started and stopped thinking and speaking | `tavus.received` (`conversation.replica.*`) | `audit_events` |
 | Why the call ended | `tavus.webhook:system.shutdown` | `audit_events`; `audit_sessions.data.shutdown` |
 | Everything in every coach's memory store once the call ended | `memory_after` | `audit_sessions.data` |
@@ -98,8 +99,8 @@ select data->>'san' from audit_events where conversation_id = '<id>' and kind in
 
 ## What is still not recorded, and why
 
+- **Tavus's once-a-second "still here" heartbeats.** They carry no content.
 - **Secrets.** The access code, notebook keys, tokens and API keys are replaced with `[redacted]` before anything is stored. This is deliberate.
 - **Raw audio and video of the call.** Only the transcript and Tavus's perception analysis are kept. Tavus can record calls, but only into an S3 bucket the account owner provides; none is configured.
-- **Word-by-word partials of an utterance.** Tavus streams each sentence as it is spoken, one growing prefix at a time. Only the final event, with the complete text, is stored; the partials contain nothing it does not.
 - **How Tavus derives learned memory, and the model's internal reasoning.** These happen inside Tavus. What goes in (the transcript, the context) and what comes out (the learned memory itself, before and after each call; every utterance and tool call) are recorded.
 - **Events still queued when something dies.** If the browser is killed while offline, or the server restarts while the database is unreachable, the events waiting in memory at that moment are lost. Tavus's webhooks (transcript, shutdown reason) arrive independently of the browser and still record the call.

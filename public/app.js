@@ -1460,11 +1460,9 @@ function sendContext(context) {
 function onAppMessage(ev) {
   const msg = ev.data || ev;
   // Every interaction event goes to the audit log, including the ones the UI
-  // ignores. Two exceptions carry nothing of their own: the once-a-second
-  // "still here" heartbeats, and the word-by-word partials of an utterance
-  // whose complete text arrives in the final event.
-  const partial = msg?.event_type === 'conversation.utterance.streaming' && msg.properties?.final === false;
-  if (!partial && !/^system\.(replica|pal)_present$/.test(msg?.event_type || '')) audit('tavus.received', msg);
+  // ignores and the word-by-word partials of each utterance. The once-a-second
+  // "still here" heartbeats are the one exception.
+  if (!/^system\.(replica|pal)_present$/.test(msg?.event_type || '')) audit('tavus.received', msg);
   if (!msg || msg.message_type !== 'conversation') return;
   const p = msg.properties || {};
   // Tavus sends each coach utterance twice (role "replica" and role "pal"); show it once.
