@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta property="og:title" content="Coach Rook · A chess coach that watches your board" />
-  <meta property="og:description" content="Most chess software gives you the answer. Coach Rook helps you find it. Watch the 45-second ad and a real 90-second call." />
+  <meta property="og:description" content="Most chess software gives you the answer. Coach Rook helps you find it. Watch the 50-second ad and a real two-minute call." />
   <meta property="og:image" content="https://coach-rook.onrender.com/ad-poster.jpg" />
   <meta property="og:url" content="https://coach-rook.onrender.com/about" />
   <meta property="og:type" content="website" />
@@ -34,14 +34,18 @@
         <a class="cta" href="/">Start a session</a>
         <a class="ghost" href="#watch">Watch the ad</a>
       </div>
-      <p class="modes">Puzzles · Practice games · Game review</p>
+      <p class="modes">Puzzles · Play · Review</p>
     </section>
 
     <figure class="film" id="watch">
-      <video controls playsinline preload="none" poster="/ad-poster.jpg" aria-label="The Coach Rook ad: the four coaches explain what the coach does, over the app's board">
-        <source src="/ad.mp4" type="video/mp4" />
-      </video>
-      <figcaption>45 seconds, sound on. Anna, Victor, Helen and Darius, recorded from live calls.</figcaption>
+      <p class="film-title"><b>The ad</b> 50 seconds, sound on</p>
+      <div class="frame">
+        <video controls playsinline preload="none" poster="/ad-poster.jpg" aria-label="The Coach Rook ad: the four coaches explain what the coach does, over the app's board">
+          <source src="/ad.mp4" type="video/mp4" />
+        </video>
+        <button class="play" type="button" aria-label="Play the ad"></button>
+      </div>
+      <figcaption>Anna, Victor, Helen and Darius, recorded from live calls. The boards and numbers on screen come from the app's engine.</figcaption>
     </figure>
 
     <!-- 2. The contrast -->
@@ -64,12 +68,17 @@
           <div><dt>"Back to puzzles."</dt><dd>You're back.</dd></div>
         </dl>
       </div>
-      <figure class="film">
-        <video controls playsinline preload="none" poster="/live-call-poster.jpg" aria-label="A recorded call: a puzzle, then the student asks for a game, a review of it, and to go back to puzzles, and the coach does each">
-          <source src="/live-call.mp4" type="video/mp4" />
-        </video>
-        <figcaption>A real call, 90 seconds, uncut. The coach's replies are live and unscripted; the student's requests were typed instead of spoken.</figcaption>
+      <figure class="film" id="call">
+        <p class="film-title"><b>A real call</b> two minutes, uncut</p>
+        <div class="frame">
+          <video controls playsinline preload="none" poster="/live-call-poster.jpg" aria-label="A recorded call with Victor: a puzzle, then the student asks for a game, a review of it, the move where it went wrong, and to go back to puzzles, and the coach does each">
+            <source src="/live-call.mp4" type="video/mp4" />
+          </video>
+          <button class="play" type="button" aria-label="Play the recorded call"></button>
+        </div>
+        <figcaption>The coach's replies are live and unscripted. The student's requests were typed instead of spoken.</figcaption>
       </figure>
+      <p class="after-film"><a class="cta" href="/">Try it yourself</a><span>The board works without a code. The video coach needs one.</span></p>
     </section>
 
     <!-- 3. Three product stories -->
@@ -172,17 +181,11 @@
       </figure>
     </section>
 
-    <!-- 6. Patience -->
-    <section class="patience">
-      <h2>A coach that knows when to shut up.</h2>
-      <p>Chess takes thinking time. Rook waits while you calculate instead of filling every silence.</p>
-    </section>
-
     <!-- 7. Final call -->
     <section class="closing">
       <h2>Don't just see the move. Find it.</h2>
       <a class="cta" href="/">Start a session</a>
-      <p>Practice puzzles, play the coach, or review one of your own games.</p>
+      <p>Puzzles, a game against the coach, or a review of one of your own games.</p>
     </section>
   </main>
 

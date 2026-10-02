@@ -25,6 +25,13 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 
 /* the product: a recording of a real session */
 .film video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #0d1410; box-shadow: 0 0 0 1px var(--line-strong), 0 24px 60px rgba(0, 0, 0, .45); }
+.film-title { margin: 0 0 12px; font-size: 14px; color: var(--dim); }
+.film-title b { color: var(--text); font-weight: 600; margin-right: 10px; }
+.film .frame { position: relative; }
+.film .play { position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 50%; border: 0; background: var(--accent); cursor: pointer; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+.film .play::before { content: ''; position: absolute; left: 34px; top: 26px; border-style: solid; border-width: 16px 0 16px 26px; border-color: transparent transparent transparent var(--accent-ink); }
+.film .play:hover { filter: brightness(1.08); }
+.after-film { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 26px; color: var(--dim); font-size: 14px; }
 .film figcaption { margin-top: 12px; font-size: 13.5px; color: var(--dim); }
 .shot-title { font-size: 20px; font-weight: 700; margin: 2px 0 10px; }
 .about .board { width: 100%; height: auto; aspect-ratio: 1; }
@@ -82,9 +89,6 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .exchange code { font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; color: var(--muted); }
 .exchange .says { font-size: 19px; line-height: 1.4; color: var(--text); }
 
-/* 6. patience */
-.patience { padding: 140px 0 0; max-width: 620px; }
-.patience p { color: var(--muted); font-size: 16.5px; }
 
 /* 7. final call */
 .closing { margin-top: 140px; padding-top: 56px; border-top: 1px solid var(--line); }

@@ -20,3 +20,12 @@ show('reviewBoard', 'rn2kb1r/p3qppp/2p2n2/1N2p1B1/2B1P3/1Q6/PPP2PPP/R3K2R b KQkq
   lastMove: { from: 'c3', to: 'b5' },
   arrows: [{ from: 'c6', to: 'b5' }],
 });
+
+// A large play button over each video's poster. Once the video starts, the browser's own controls take over.
+for (const frame of document.querySelectorAll('.film .frame')) {
+  const video = frame.querySelector('video');
+  const button = frame.querySelector('.play');
+  button.addEventListener('click', () => video.play());
+  video.addEventListener('play', () => (button.hidden = true));
+  video.addEventListener('ended', () => (button.hidden = false));
+}
