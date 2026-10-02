@@ -48,9 +48,19 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .ladder li:last-child { border-bottom: 1px solid var(--line); }
 .ladder li::before { content: counter(step); position: absolute; left: 0; top: 11px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--dim); }
 .ladder b { color: var(--text); font-weight: 600; }
-.roster { display: flex; align-items: center; margin-top: 26px; font-size: 13.5px; color: var(--dim); }
-.roster img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--bg); margin-right: -8px; }
-.roster span { margin-left: 22px; }
+.ask { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; padding: 140px 0 0; }
+.ask .film { margin: 0; }
+.asks { margin: 26px 0 0; }
+.asks > div { padding: 12px 0; border-top: 1px solid var(--line); }
+.asks > div:last-child { border-bottom: 1px solid var(--line); }
+.asks dt { color: var(--text); font-weight: 600; font-size: 15.5px; }
+.asks dd { margin: 3px 0 0; color: var(--muted); font-size: 14.5px; }
+.team { padding: 140px 0 0; }
+.coaches-grid { list-style: none; margin: 34px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.coaches-grid img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 10px; margin-bottom: 14px; }
+.coaches-grid b { display: block; font-size: 17px; }
+.coaches-grid span { display: block; margin-top: 4px; color: var(--muted); font-size: 14.5px; }
+.fine { margin-top: 22px; color: var(--dim); font-size: 14px; }
 
 .levels { margin: 0; font-size: 14.5px; }
 .levels > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
@@ -88,6 +98,9 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
   .lead { font-size: 16.5px; }
   .contrast, .story, .trust { padding-top: 88px; }
   .story { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .ask { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-top: 88px; }
+  .team { padding-top: 88px; }
+  .coaches-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .story.flip .copy { order: 0; }
   .patience { padding-top: 88px; }
   .closing { margin-top: 88px; padding-top: 40px; }

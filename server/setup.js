@@ -43,6 +43,11 @@ function palBody(coach) {
     pipeline_mode: 'full',
     default_face_id: coach.face_id,
     layers: {
+      // The model has to call tools reliably: the coach drives the app through
+      // them. Measured on 2026-10-02 with the same four spoken requests (start a
+      // game, review it, go to the key moment, back to puzzles): Tavus's default
+      // model made 1 of the 4 tool calls and claimed the rest; this one made 4 of 4.
+      llm: { model: process.env.TAVUS_LLM_MODEL || 'tavus-gpt-4.1' },
       perception: { perception_model: 'raven-1' },
       conversational_flow: {
         turn_detection_model: 'sparrow-2',

@@ -1446,6 +1446,10 @@ function sendProtocol(event_type, properties) {
 }
 
 // Board events the PAL should react to out loud.
+// ?typed lets a script stand in for the student's voice: studentSays('…') reaches
+// the coach exactly as a spoken sentence would. Used by the recorded call tests.
+if (new URLSearchParams(location.search).has('typed')) window.studentSays = (text) => sendProtocol('conversation.respond', { text: String(text) });
+
 function sendRespond(text) {
   log('board → conversation.respond', 'out', text);
   sendProtocol('conversation.respond', { text });

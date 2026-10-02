@@ -14,6 +14,13 @@ Three modes:
 
 There are four coaches to choose from, each with its own face, voice and manner. The coach remembers you between sessions.
 
+## Watch
+
+- **The ad** (45 seconds): https://coach-rook.onrender.com/ad.mp4
+- **A real call** (90 seconds, uncut): https://coach-rook.onrender.com/live-call.mp4. A puzzle, then the student asks for a game, a review of it, the move where it went wrong, and to go back to puzzles; the coach does each. The coach's replies are live and unscripted. The student's requests were typed (`?typed`), not spoken.
+
+Both are on the [About page](https://coach-rook.onrender.com/about).
+
 ## Contents
 
 - [Run it](#run-it)
@@ -62,6 +69,7 @@ Set these in `.env` locally or in the host's environment.
 | `DATABASE_URL` | none | Postgres connection string for the audit log and the student ledger. Without it both are held in memory and lost on restart, which for the ledger means memory cannot be rebuilt. Set it in production. |
 | `ADMIN_TOKEN` | none | Turns on `/admin`. Use a long random value. |
 | `MAX_CALL_SECONDS` | `3600` | Longest a video session may run. 3600 is Tavus's ceiling. |
+| `TAVUS_LLM_MODEL` | `tavus-gpt-4.1` | The language model behind every coach. Tavus's default model did not call tools reliably (see Design decisions). |
 | `AUDIT_RETENTION_DAYS` | `0` | Days of audit events to keep. `0` keeps everything. |
 | `PORT` | `3000` | Port to listen on. |
 | `PUBLIC_URL` | `RENDER_EXTERNAL_URL` | The server's public address, so Tavus can send callbacks (transcript, shutdown reason). |
@@ -104,6 +112,7 @@ curl https://<your-app>/healthz        # reports the commit that is live
 |---|---|
 | `?debug` | Adds a live log drawer of tool calls and board events. |
 | `?sim=1` | Adds buttons to that drawer that fire fake tool calls through the real handlers, without spending conversation minutes. |
+| `?typed` | Exposes `studentSays('…')` in the console: a typed line reaches the coach as a spoken one would. Used to record and test calls from a script. |
 | `?nomedia` | Joins a call without the microphone or camera. |
 
 ## Architecture
@@ -250,6 +259,7 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)".
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while the student calculates, and `idle_engagement: patient` gives a nudge, not an answer, when they go quiet.
 - **Memory is written from the board, and the app keeps its own copy.** The ledger is permanent; Tavus's pinned notes are rebuilt from it and verified after every write. Tavus's learned memory adds the softer context.
+- **The model is chosen for tool calling.** The coach runs the app through tools, so a model that says "starting a game" without calling the tool breaks the product. On the same four requests in a live call, Tavus's default model made one tool call of four; `tavus-gpt-4.1` made all four. Every coach uses it.
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general speech-to-text mangles.
 - **The key stays on the server.** The browser only gets a `conversation_url`.
 - **Setup is code.** `npm run setup` is idempotent: tools are matched by name and patched, each PAL is found by ID or name and patched in place. A fresh deploy configures itself on boot.
@@ -317,6 +327,7 @@ public/gameview.js       move list, evaluation timeline, evaluation bar, player 
 public/sounds.js         synthesized move sounds (WebAudio, no audio files)
 public/admin.*           the admin dashboard
 public/about.*           the marketing page
+public/ad.mp4, live-call.mp4   the ad and a recorded call, shown on the marketing page
 public/coaches/          coach thumbnails
 public/pieces/           piece images (cburnett set, see LICENSE.txt there)
 public/samples/          two sample games for review
