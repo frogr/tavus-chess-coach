@@ -8,14 +8,14 @@ const CODE = 'open-sesame';
 const KEY = 'abcde-fghjk-mnpqr-stuvw'; // the notebook key a browser would generate
 const env = (tavus, extra = {}) => ({ TAVUS_API_KEY: 'test-key', TAVUS_API_BASE: tavus.base, ACCESS_CODE: CODE, ...extra });
 
-test('a fresh boot registers 6 tools and one PAL, and config waits for it', async (t) => {
+test('a fresh boot registers 9 tools and one PAL, and config waits for it', async (t) => {
   const tavus = await startFakeTavus();
   const app = await startServer(env(tavus));
   t.after(() => Promise.all([app.stop(), tavus.stop()]));
 
   // Asked immediately after boot: must wait for setup instead of reporting "not configured".
   assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: true, needsCode: true });
-  assert.equal(tavus.db.tools.length, 6);
+  assert.equal(tavus.db.tools.length, 9);
   assert.equal(tavus.db.pals.length, 1);
   assert.match(app.output(), /PAL ready: p\w+/);
   assert.ok(tavus.db.requests.every((r) => r.key === 'test-key'));

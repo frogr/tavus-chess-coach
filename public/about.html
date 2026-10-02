@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Coach Rook · A video chess coach</title>
-  <meta name="description" content="A live video chess coach that watches your board. Solve puzzles or review your own games with a coach who sees every move and checks its advice with Stockfish." />
+  <meta name="description" content="A live video chess coach that watches your board. Solve puzzles, play the coach, or review your own games with a coach who sees every move and checks its advice with Stockfish." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
@@ -20,7 +20,7 @@
   <main>
     <section class="hero">
       <h1>A chess coach that watches your board.</h1>
-      <p class="lead">Coach Rook joins you on a video call beside a real board. Solve puzzles or go through one of your own games. The coach sees every move you make, talks it through with you, and points at the squares it means.</p>
+      <p class="lead">Coach Rook joins you on a video call beside a real board. Solve puzzles, play a game against the coach, or go through one of your own games. The coach sees every move you make, talks it through with you, and points at the squares it means.</p>
       <div class="hero-actions">
         <a class="cta" href="/">Open the board</a>
         <span class="aside">The board is open to anyone. The video coach needs an access code.</span>
@@ -63,6 +63,22 @@
     </section>
 
     <section class="row flip">
+      <div class="copy">
+        <h2>Play the coach</h2>
+        <p>A full game against Coach Rook at one of six strengths. At the low end it teaches while it plays. At the top it is the engine at full strength, playing to win.</p>
+        <p>Ask about the position at any point and you get an engine-checked answer. You can take moves back, and when the game ends it goes straight into review.</p>
+      </div>
+      <dl class="levels" aria-label="Coach strengths">
+        <div><dt>500</dt><dd>Plays like a beginner. Warns you about threats and offers take-backs.</dd></div>
+        <div><dt>1000</dt><dd>A casual player. Explains each mistake and offers a take-back.</dd></div>
+        <div><dt>1500</dt><dd>A club player. Points out mistakes after they happen.</dd></div>
+        <div><dt>2000</dt><dd>A strong club player. Comments only on turning points.</dd></div>
+        <div><dt>2500</dt><dd>Master strength. Explains only when asked.</dd></div>
+        <div><dt>3000</dt><dd>Full engine strength. Gives nothing away until the game is over.</dd></div>
+      </dl>
+    </section>
+
+    <section class="row">
       <div class="copy">
         <h2>Game review</h2>
         <p>Paste a PGN or a Lichess link. Stockfish goes through every move and picks out the ones that cost you the most.</p>

@@ -182,8 +182,20 @@ label.inline { font-size: 13px; color: var(--muted); display: flex; align-items:
 label.inline select { padding: 6px 8px; color: var(--text); }
 
 /* modes */
-body[data-mode="puzzle"] .review-only { display: none; }
-body[data-mode="review"] .puzzle-only { display: none; }
+body:not([data-mode="puzzle"]) .puzzle-only { display: none; }
+body:not([data-mode="review"]) .review-only { display: none; }
+body:not([data-mode="play"]) .play-only { display: none; }
+
+/* play the coach */
+.play { margin-top: 12px; }
+.game-setup { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.strength { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); }
+.strength output { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+#strength { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--accent); cursor: pointer; }
+.ticks { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.game-setup .controls { margin-top: 8px; }
+.game-setup .primary { margin-left: auto; }
+span.mv { cursor: default; }
 
 /* review */
 .review { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }

@@ -75,6 +75,7 @@
     <section class="board-col">
       <nav class="tabs" aria-label="Mode">
         <button data-tab="puzzle" class="active">Puzzles</button>
+        <button data-tab="play">Play</button>
         <button data-tab="review">Review</button>
       </nav>
 
@@ -86,6 +87,18 @@
         <div class="status" id="status" role="status" aria-live="polite"></div>
       </div>
 
+      <form id="gameSetup" class="game-setup play-only">
+        <label class="strength" for="strength">Coach strength <output id="strengthOut" for="strength">1500</output></label>
+        <input id="strength" type="range" min="0" max="5" step="1" value="2" />
+        <div class="ticks" aria-hidden="true"><span>500</span><span>1000</span><span>1500</span><span>2000</span><span>2500</span><span>3000</span></div>
+        <div class="controls">
+          <label class="inline">Play as
+            <select id="gameColor"><option value="random">Random</option><option value="w">White</option><option value="b">Black</option></select>
+          </label>
+          <button class="primary">Start game</button>
+        </div>
+      </form>
+
       <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to.">
         <div class="promo" role="group" aria-label="Choose a piece to promote to"><div></div></div>
       </div>
@@ -94,6 +107,18 @@
         <button id="retry" class="quiet">Reset</button>
         <button id="next" class="quiet">Next</button>
         <span class="moves" id="moves"></span>
+      </div>
+
+      <div class="play-only play">
+        <div id="gameBar" hidden>
+          <div class="controls">
+            <button id="takeBack" class="quiet">Take back</button>
+            <button id="resign" class="quiet">Resign</button>
+            <button id="reviewGame" class="quiet" hidden>Review this game</button>
+            <button id="newGame" class="quiet" hidden>New game</button>
+          </div>
+          <div id="playMoves" class="game-moves"></div>
+        </div>
       </div>
 
       <div class="review-only review">
@@ -137,6 +162,9 @@
       <button class="quiet small" data-sim="solution">play solution</button>
       <button class="quiet small" data-sim="moment">go to moment 1</button>
       <button class="quiet small" data-sim="line">engine line</button>
+      <button class="quiet small" data-sim="game">new game</button>
+      <button class="quiet small" data-sim="takeback">take back</button>
+      <button class="quiet small" data-sim="reviewgame">review game</button>
     </div>
     <ol id="log" class="log"></ol>
   </aside>

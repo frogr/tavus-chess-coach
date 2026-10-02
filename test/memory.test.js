@@ -79,7 +79,7 @@ test('sanitizeSummary keeps only what the board can produce', () => {
 });
 
 test('sanitizeSummary survives junk input', () => {
-  for (const junk of [null, undefined, 'text', 7, [], { puzzles: 'x', review: 'y' }]) {
-    assert.deepEqual(sanitizeSummary(junk), { puzzles: [], review: null });
+  for (const junk of [null, undefined, 'text', 7, [], { puzzles: 'x', review: 'y', games: 'z' }]) {
+    assert.deepEqual(sanitizeSummary(junk), { puzzles: [], review: null, games: [] });
   }
 });

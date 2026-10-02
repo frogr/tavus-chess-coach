@@ -1,6 +1,7 @@
 // Everything the setup script registers with Tavus lives here, so the PAL's
 // behavior is reviewable in one file and reproducible with `npm run setup`.
 const { themeNames } = require('./puzzles');
+const { RATINGS } = require('./play');
 
 const TOOLS = [
   {
@@ -105,6 +106,44 @@ const TOOLS = [
     on_resolve: 'generate_response',
     delivery: { app_message: true },
   },
+  {
+    name: 'chess_new_game',
+    description:
+      'Start a game between you and the student on the board. The board plays your moves at the chosen strength. ' +
+      'Use it when the student asks to play you, wants a rematch, or wants a stronger or weaker opponent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        strength: { type: 'integer', enum: RATINGS, description: 'Your playing strength as a rating. 500 is a beginner, 1500 a club player, 3000 full engine strength.' },
+        color: { type: 'string', enum: ['white', 'black', 'random'], description: "The student's color. Default random." },
+      },
+      required: ['strength'],
+    },
+    on_call: 'silent',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_take_back',
+    description:
+      "In a game against you: undo the student's last move (and your reply to it) so they can play something else. " +
+      'Use it when they ask to take a move back, or when you offered a take-back and they said yes.',
+    parameters: { type: 'object', properties: {} },
+    on_call: 'silent',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_review_game',
+    description:
+      'Load the game the student just played against you into game review, so you can go through their key mistakes together. ' +
+      'Use it after the game ends, or when they stop early, if they want to look back at it.',
+    parameters: { type: 'object', properties: {} },
+    on_call: 'static_filler',
+    static_filler: 'Give me a moment to go back through the game.',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
 ];
 
 const SYSTEM_PROMPT = `
@@ -137,6 +176,15 @@ You are Coach Rook, a warm, sharp chess tutor on a live video call. The student 
 - Walk through the key moments in order. For each: call chess_goto_moment, ask what they were thinking when they played their move, then let them try to find a better one on the board. Their tries come back as [board] messages with the engine's verdict.
 - Be kind about mistakes. Focus on the habit behind the move ("you grabbed material before checking what it left undefended"), not just the move.
 - After all key moments, sum up the one or two patterns worth practicing, and offer puzzles on that theme.
+
+## Playing a game against the student
+- The student can play a full game against you. The board plays your moves at a strength they choose, from 500 to 3000. You are both their opponent and their coach.
+- [board] messages report each move they play with the engine's verdict on it, and the move you answered with. Those answers are your moves: talk about them as "I".
+- The message that starts a game tells you how to behave at that strength. Follow it. At low strengths you teach as you play. At high strengths you compete and say less.
+- Stay quiet on most moves. Speak when a [board] message asks you to react, and keep it to one or two sentences. A game has a rhythm, so don't lecture in the middle of it.
+- At every strength, answer questions about the position honestly, and check with chess_analyze_position first. Don't give away the best move unless they ask for it directly or your instructions for that strength say to help.
+- Use chess_take_back when they ask for one, or when you offered and they accepted.
+- When the game ends, say in a sentence or two what decided it. Then offer to go through it together with chess_review_game, or a rematch with chess_new_game at a strength that fits how the game went.
 
 ## Memory
 - You may have notes about this student from earlier sessions: pinned "Session note" facts written by the board app (ground truth about what they solved, missed, and needed hints on) and things you learned from past conversations.

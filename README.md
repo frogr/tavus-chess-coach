@@ -1,14 +1,15 @@
 # Coach Rook
 
-A live video chess tutor built on Tavus CVI, with two modes:
+A live video chess tutor built on Tavus CVI, with three modes:
 
 - **Puzzles.** You solve tactics on a real board while a PAL watches every move, talks you through hints, **points at squares on your screen**, and checks every claim against Stockfish before making it.
 - **Game review.** Paste one of your games (PGN or a Lichess link). Stockfish scores every move, picks out your biggest mistakes, and Coach Rook walks you through them one at a time: back to the position before the mistake, "what were you thinking here?", and a chance to find the better move yourself before it shows you the engine's line.
+- **Play the coach.** A full game against Coach Rook at one of six strengths, 500 to 3000. The coach plays, comments, answers questions about the position, and gets less forgiving as the rating goes up. Afterwards the game goes straight into review.
 
 ```
 npm install
 cp .env.example .env        # add TAVUS_API_KEY
-npm run setup               # registers 6 tools + the PAL, writes .tavus.json
+npm run setup               # registers 9 tools + the PAL, writes .tavus.json
 npm start                   # http://localhost:3000
 npm test                    # unit + HTTP tests; Tavus is faked, no key or minutes needed
 ```
@@ -56,7 +57,7 @@ A coach waits while you think, asks instead of telling, and points at the board.
 │  Board (chess.js)  ── source of truth   │          │  PAL "Coach Rook"    │
 │        │                                │  app     │  Raven-1 perception   │
 │        ├─ student moves ──► respond ────┼─message─►│  Sparrow-2 (patient)  │
-│        ├─ puzzle loads ─► append_context│  (Daily) │  LLM + 6 tools        │
+│        ├─ puzzle loads ─► append_context│  (Daily) │  LLM + 9 tools        │
 │        │                                │          │  memory per student   │
 │  Tool handlers ◄─── conversation.tool_call ────────┤                      │
 │        │        ───► conversation.tool_result ────►│                      │
@@ -73,7 +74,7 @@ A coach waits while you think, asks instead of telling, and points at the board.
 **Two directions of traffic, both over the interaction protocol:**
 
 1. **Board → PAL.** Every student move becomes a `conversation.respond` event tagged `[board]`, already annotated with ground truth: was it correct, what the opponent replied, and for wrong moves, what the engine says the move allowed. The PAL reacts as if it watched the move. Puzzle loads go in as `conversation.append_llm_context`, including the solution marked "for the coach only", so hints are graded instead of guessed.
-2. **PAL → board.** Six tools with app-message delivery, handled in the browser:
+2. **PAL → board.** Nine tools with app-message delivery, handled in the browser:
 
 | Tool | What it does | `on_call` / `on_resolve` | Why |
 |---|---|---|---|
@@ -83,6 +84,16 @@ A coach waits while you think, asks instead of telling, and points at the board.
 | `chess_play_solution` | Animates the full answer | `silent` / `generate_response` | Only when the student gives up |
 | `chess_goto_moment` | Review: jumps to key moment N, the position just before the student's mistake, and lets them try again | `silent` / `generate_response` | The PAL drives the review's pacing; the board does the bookkeeping |
 | `chess_show_engine_line` | Animates the engine's better line, then returns to the position | `static_filler` / `generate_response` | "Watch this" while the pieces move, then the PAL explains the idea |
+| `chess_new_game` | Starts a game against the coach at a strength (500–3000) and color | `silent` / `generate_response` | "Let's play, but go easy on me" works by voice |
+| `chess_take_back` | Undoes the student's last move and the coach's answer | `silent` / `generate_response` | The coach offers take-backs at low strengths |
+| `chess_review_game` | Loads the game just played into review | `static_filler` / `generate_response` | The engine pass takes a few seconds |
+
+## Playing the coach
+
+- **Strength.** `server/play.js` weakens Stockfish the way Lichess and chess.com levels do: a shallower search, then a weighted pick among the engine's top candidates, where the weight on worse moves grows as the rating drops. At 500 and 1000 there is also a small chance of a move played without looking. 3000 is the engine's best move. The ratings are labels for these settings, not measured Elo.
+- **One request per move.** `POST /api/play` judges the student's move with the same win-chance scoring the review uses, then answers it, and returns the position in words.
+- **The coach hears every move but speaks on few.** Each move goes to the PAL as silent context with the engine's verdict. It is asked to speak when the student blunders (or makes a mistake, below 2500), after a run of quiet moves, and when the game ends. The message that starts a game sets the attitude for that strength: teaching and offering take-backs at 500, competing and saying little at 3000. Questions get an honest, engine-checked answer at every strength.
+- **Games feed memory.** The session note records the strength, color, result and costliest moves.
 
 ## Design decisions
 
@@ -129,6 +140,7 @@ server/puzzles.js      puzzle selection: theme, level, no repeats
 server/puzzle-pool.json  ~4,800 puzzles from the Lichess database (CC0), verified against our engine
 server/themes.js       the 20 tactical patterns the coach teaches
 scripts/import-puzzles.js  rebuilds the pool from the Lichess database
+server/play.js         playing the coach: strength levels, move choice, one turn of a game
 server/review.js       game review: per-move engine pass, mistake scoring, key moments, try-a-move judging
 public/samples/        two sample games for the review mode
 server/setup.js        idempotent Tavus setup (tools, PAL, attach); also runs on first boot

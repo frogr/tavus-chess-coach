@@ -37,6 +37,11 @@
 .themes { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 32px; font-size: 14.5px; }
 .themes li { padding: 8px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
 
+.levels { margin: 0; font-size: 14.5px; }
+.levels > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.levels dt { font-weight: 700; font-variant-numeric: tabular-nums; }
+.levels dd { margin: 0; color: var(--muted); }
+
 .review-shot { margin: 0; }
 .review-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .review-meta .chip { border: 1px solid; }

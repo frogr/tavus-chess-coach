@@ -30,7 +30,8 @@ const state = {
   call: null,
   conversationId: null,
   player: '',
-  mode: 'puzzle', // 'puzzle' | 'review'
+  mode: 'puzzle', // 'puzzle' | 'play' | 'review'
+  game: null, // the game against the coach, if one was started
   orientation: 'w', // which side is at the bottom
   review: null, // result of /api/review
   reviewPly: 0, // half-moves shown on the board in review mode
@@ -42,7 +43,7 @@ const state = {
 };
 
 function newSessionLog() {
-  return { puzzles: {}, review: null };
+  return { puzzles: {}, review: null, games: [] };
 }
 function puzzleLog() {
   if (!state.sessionLog || state.mode !== 'puzzle') return null;
@@ -179,10 +180,15 @@ function log(kind, cls, text, detail) {
 }
 
 // ---------------------------------------------------------------- board render
-const canMove = () => !state.busy && (state.mode === 'review' ? state.trying : !state.solved);
+const canMove = () => {
+  if (state.busy) return false;
+  if (state.mode === 'review') return state.trying;
+  if (state.mode === 'play') return Boolean(state.game) && !state.game.over && state.chess === state.game.chess && state.chess.turn() === state.game.color;
+  return !state.solved;
+};
 const board = new Board($('board'), {
   canMove,
-  onMove: (from, to, promotion) => (state.mode === 'review' ? reviewTry(from, to, promotion || 'q') : playerMove(from, to, promotion || 'q')),
+  onMove: (from, to, promotion) => ({ review: reviewTry, play: gameMove, puzzle: playerMove })[state.mode](from, to, promotion || 'q'),
 });
 let shownArrows = '';
 
@@ -424,7 +430,8 @@ function evalText(cp) {
   return `${cp > 0 ? '+' : ''}${(cp / 100).toFixed(1)}`;
 }
 
-async function loadReview(pgn, side) {
+// Resolves to the review, or null if the game could not be analyzed.
+async function loadReview(pgn, side, { announce = true } = {}) {
   setMode('review');
   $('reviewGo').disabled = true;
   $('reviewGo').textContent = 'Analyzing…';
@@ -452,12 +459,14 @@ async function loadReview(pgn, side) {
         tries: [],
       };
     }
-    if (state.conversationId) {
+    if (announce && state.conversationId) {
       sendRespond(review.context + ' The student just loaded this game. In one or two sentences, give your overall impression and offer to start with the first key moment.');
     }
+    return review;
   } catch (e) {
     setStatus(e.message, 'bad');
     log('error', 'err', e.message);
+    return null;
   } finally {
     $('reviewGo').disabled = false;
     $('reviewGo').textContent = 'Analyze';
@@ -668,7 +677,7 @@ async function showPuzzleEngineLine() {
   const a = await api('/api/analyze', { fen: state.chess.fen() });
   const line = a.best ? a.best.san.slice(0, 4) : [];
   if (!line.length) return 'There is no engine line to show here: the position on the board is already finished.';
-  tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
+  if (state.mode === 'puzzle') tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
   const before = { chess: state.chess, lastMove: state.lastMove };
   setStatus(line.join(' '), '');
   const played = await animateLine(before.chess.fen(), line);
@@ -679,10 +688,302 @@ async function showPuzzleEngineLine() {
     state.lastMove = before.lastMove;
     state.busy = false;
     state.snap = true;
-    setStatus(state.solved ? `Solved · ${puzzle().theme}` : '', state.solved ? 'good' : '');
+    if (state.mode === 'puzzle') setStatus(state.solved ? `Solved · ${puzzle().theme}` : '', state.solved ? 'good' : '');
+    else setStatus('');
     render();
   }, 4000);
   return `The board animated the engine's line from the current position: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
+}
+
+// ---------------------------------------------------------------- play the coach
+// A full game against the coach. The server picks the coach's moves at the
+// chosen strength and judges each of the student's moves; the coach is told
+// about every move, and asked to speak only when there is something to say.
+const RATINGS = [500, 1000, 1500, 2000, 2500, 3000];
+const MARK = { inaccuracy: '?!', mistake: '?', blunder: '??' };
+// How the coach should carry itself at each strength. Sent when a game starts.
+const ATTITUDE = {
+  500: 'You are playing like a beginner on purpose. Teach while you play: warn about a threat before it lands, praise good ideas, and when they blunder explain it kindly and offer a take-back.',
+  1000: 'You are playing like a casual player. Be encouraging. When they make a mistake, say what it allowed and offer a take-back.',
+  1500: 'You are playing like a club player. Friendly sparring: point out a mistake in a sentence after it happens, and give hints when asked. Take-backs only if they ask.',
+  2000: 'You are playing like a strong club player and this is a serious game. Speak less, comment only on turning points, and allow yourself a little competitive banter. Hints only when asked.',
+  2500: 'You are playing at master strength and you want to win. Be confident and brief. Explain only when asked, and make them work for it.',
+  3000: 'You are playing at full engine strength and giving nothing away. Dry, competitive, respectful. Still answer questions honestly when asked, and be generous once the game is over.',
+};
+// How many of the student's moves may pass before the coach says something unprompted.
+const QUIET_MOVES = [4, 4, 6, 6, 9, 9];
+
+function storedStrength() {
+  try {
+    const r = Number(localStorage.getItem('coach-rook-strength'));
+    return RATINGS.includes(r) ? r : 1500;
+  } catch {
+    return 1500;
+  }
+}
+
+// How the game on the board ended, or null while it is still going.
+function outcome(g) {
+  const c = g.chess;
+  if (c.isCheckmate()) return c.turn() === g.color ? ['lost', 'Checkmate'] : ['won', 'Checkmate'];
+  if (c.isStalemate()) return ['drew', 'Stalemate'];
+  if (c.isThreefoldRepetition()) return ['drew', 'Draw by repetition'];
+  if (c.isInsufficientMaterial()) return ['drew', 'Draw by insufficient material'];
+  if (c.isDraw()) return ['drew', 'Draw by the fifty-move rule'];
+  return null;
+}
+
+const costliest = (g) => [...g.mistakes].sort((a, b) => b.loss - a.loss).slice(0, 3).sort((a, b) => a.ply - b.ply).map((m) => m.label);
+
+function renderGame() {
+  const g = state.game;
+  $('pLevel').textContent = g ? `vs Coach Rook · ${g.rating}` : 'vs Coach Rook';
+  if (!g) {
+    $('pTitle').textContent = 'Play the coach';
+    setStatus('');
+  } else if (g.over) {
+    $('pTitle').textContent = g.reason;
+    setStatus({ won: 'You won', lost: 'You lost', drew: 'Draw', unfinished: '' }[g.result], g.result === 'won' ? 'good' : g.result === 'lost' ? 'bad' : '');
+  } else {
+    $('pTitle').textContent = `${sideName(g.chess.turn())} to move`;
+    setStatus('');
+  }
+  $('gameSetup').hidden = Boolean(g);
+  $('gameBar').hidden = !g;
+  $('takeBack').hidden = $('resign').hidden = !g || g.over;
+  $('reviewGame').hidden = !g || !g.over || g.sans.length < 2;
+  $('newGame').hidden = !g || !g.over;
+  const list = $('playMoves');
+  list.replaceChildren();
+  (g ? g.sans : []).forEach((san, i) => {
+    const el = document.createElement('span');
+    // Verdicts on the student's moves appear once the game is over.
+    const mark = g.over ? g.marks[i] : null;
+    el.className = `mv ${mark || ''}`;
+    el.textContent = `${i % 2 === 0 ? `${i / 2 + 1}. ` : ''}${san}${mark ? MARK[mark] : ''}`;
+    list.append(el);
+  });
+  list.scrollTop = list.scrollHeight;
+  render();
+}
+
+function showPlay() {
+  setMode('play');
+  newPosition();
+  const g = state.game;
+  state.chess = g ? g.chess : new Chess();
+  state.orientation = g ? g.color : 'w';
+  state.lastMove = g ? g.lastMove : null;
+  state.selected = null;
+  state.highlights = [];
+  state.arrows = [];
+  state.badge = null;
+  renderGame();
+}
+
+const playerName = () => state.player || 'The student';
+
+// Games played during a call go into the session note.
+function logGame(g) {
+  if (state.sessionLog && !state.sessionLog.games.includes(g)) state.sessionLog.games.push(g);
+}
+
+// Returns what the coach should know about the new game.
+async function startGame(rating, color, { announce = true } = {}) {
+  if (!RATINGS.includes(rating)) rating = storedStrength();
+  if (state.game && !state.game.over) finishGame(state.game, 'unfinished', 'Game stopped');
+  const side = color === 'w' || color === 'b' ? color : Math.random() < 0.5 ? 'w' : 'b';
+  const g = (state.game = { rating, color: side, chess: new Chess(), sans: [], marks: {}, mistakes: [], over: false, result: 'unfinished', reason: '', quiet: 0, lastMove: null });
+  try { localStorage.setItem('coach-rook-strength', String(rating)); } catch {}
+  $('strength').value = RATINGS.indexOf(rating);
+  $('strengthOut').textContent = rating;
+  audit('play.new', { rating, color: side });
+  showPlay();
+  let opening = '';
+  if (side === 'b') {
+    const turn = await coachTurn(g, g.chess.fen(), null).catch((e) => (setStatus(e.message, 'bad'), null));
+    if (turn?.reply) opening = ` You opened with ${turn.reply.san}.`;
+  }
+  const context =
+    `[board] New game against you. Your strength for this game: ${rating}. ${playerName()} plays ${sideName(side)} and you play ${sideName(side === 'w' ? 'b' : 'w')}.${opening} ` +
+    `How to behave at this strength: ${ATTITUDE[rating]}`;
+  if (announce && state.conversationId) sendRespond(`${context} Say one short line to start the game.`);
+  return context;
+}
+
+// Asks the server to judge the student's move (if there is one) and answer it,
+// then plays the answer on the board. Resolves to null if the game was left
+// or replaced while the coach was thinking.
+async function coachTurn(g, fen, move) {
+  const gen = generation;
+  state.busy = true;
+  board.refresh();
+  const started = Date.now();
+  let turn;
+  try {
+    turn = await api('/api/play', { fen, move, rating: g.rating });
+  } finally {
+    if (gen === generation) state.busy = false;
+  }
+  await sleep(Math.max(0, 500 - (Date.now() - started)));
+  if (gen !== generation || state.game !== g) return null;
+  if (turn.reply) {
+    const uci = turn.reply.uci;
+    const m = g.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
+    g.sans.push(m.san);
+    g.lastMove = state.lastMove = m;
+    moveSound(m.san);
+    audit('play.reply', { san: m.san, uci, rating: g.rating });
+  }
+  renderGame();
+  return turn;
+}
+
+async function gameMove(from, to, promotion = 'q') {
+  const g = state.game;
+  const fen = g.chess.fen();
+  const move = g.chess.move({ from, to, promotion });
+  const ply = g.sans.push(move.san);
+  g.lastMove = state.lastMove = move;
+  state.highlights = [];
+  state.arrows = [];
+  moveSound(move.san);
+  logGame(g);
+  audit('play.move', { fen, san: move.san, uci: move.lan, rating: g.rating });
+  const moveNo = Math.ceil(ply / 2);
+  const said = `${playerName()} played ${move.san} (${describeMoveWords(move, g.chess)})`;
+
+  let end = outcome(g);
+  if (end) {
+    renderGame();
+    sendRespond(finishGame(g, end[0], end[1], `[board] Game, move ${moveNo}: ${said}.`));
+    return;
+  }
+  renderGame();
+
+  // Put the student's move back if the coach's answer never arrives.
+  const putBack = () => {
+    g.chess.undo();
+    g.sans.pop();
+    const h = g.chess.history({ verbose: true });
+    g.lastMove = h[h.length - 1] || null;
+    if (state.mode === 'play' && state.game === g) {
+      state.lastMove = g.lastMove;
+      renderGame();
+    }
+  };
+  let turn;
+  try {
+    turn = await coachTurn(g, fen, move.lan);
+  } catch (e) {
+    putBack();
+    setStatus(e.message, 'bad');
+    return;
+  }
+  if (!turn) return putBack();
+
+  const j = turn.judge;
+  if (j.class) {
+    g.marks[ply - 1] = j.class;
+    if (j.class !== 'inaccuracy') g.mistakes.push({ ply, loss: j.lossPct, label: `${moveNo}${g.color === 'w' ? '.' : '...'} ${move.san}${MARK[j.class]}` });
+  }
+  audit('play.judge', { san: move.san, class: j.class, lossPct: j.lossPct, best: j.bestSan });
+  const text =
+    `[board] Game, move ${moveNo}: ${said}. Engine verdict: ${j.class || (move.san === j.bestSan ? 'the best move' : 'a good move')}. ` +
+    (j.class ? `Better was ${j.bestSan} (${j.bestWords}). ` : '') +
+    `Evaluation after it: ${j.evalAfter}. ` +
+    (turn.reply ? `You answered ${turn.reply.san} (${turn.reply.words}). ` : '') +
+    `Position now: ${turn.position}`;
+
+  end = outcome(g);
+  if (end) return sendRespond(finishGame(g, end[0], end[1], text));
+
+  const level = RATINGS.indexOf(g.rating);
+  g.quiet += 1;
+  if (j.class === 'blunder' || (j.class === 'mistake' && level <= 3)) {
+    g.quiet = 0;
+    const ask =
+      level <= 1
+        ? 'React in one or two sentences: say in plain words what their move allowed, and offer a take-back.'
+        : level <= 3
+          ? 'React in one sentence: say what their move allowed.'
+          : 'One short, competitive remark. Explain only if they ask.';
+    sendRespond(`${text} ${ask}`);
+  } else if (g.quiet >= QUIET_MOVES[level]) {
+    g.quiet = 0;
+    sendRespond(`${text} Say one short thing about how the game is going, in character for this strength.`);
+  } else {
+    sendContext(text);
+  }
+}
+
+// Ends the game and returns what the coach should be told about it.
+function finishGame(g, result, reason, lead = '[board]') {
+  g.over = true;
+  g.result = result;
+  g.reason = reason;
+  audit('play.end', { result, reason, rating: g.rating, moves: Math.ceil(g.sans.length / 2), mistakes: costliest(g) });
+  if (state.game === g && state.mode === 'play') {
+    state.busy = false;
+    if (result === 'won') setTimeout(() => sounds.play('great'), 260);
+    renderGame();
+  }
+  const who = playerName();
+  const how = { won: `${who} won`, lost: `${who} lost`, drew: 'It is a draw', unfinished: `${who} stopped the game` }[result];
+  const worst = costliest(g);
+  return (
+    `${lead} The game against you (strength ${g.rating}) is over: ${reason}. ${how} after ${Math.ceil(g.sans.length / 2)} moves. ` +
+    (worst.length ? `Their costliest moves: ${worst.join(', ')}. ` : '') +
+    'Say in a sentence or two what decided it, then offer to go through the game together (chess_review_game) or a rematch (chess_new_game).'
+  );
+}
+
+// Undo the student's last move and the coach's answer to it.
+async function takeBack() {
+  const g = state.game;
+  if (!g || g.over || state.mode !== 'play') return 'There is no game in progress to take a move back in.';
+  if (state.busy || g.chess.turn() !== g.color) return 'Wait for your own move to be played before taking back.';
+  if (g.sans.length < (g.color === 'w' ? 2 : 3)) return 'There is no move to take back yet.';
+  g.chess.undo();
+  g.chess.undo();
+  const [san] = g.sans.splice(-2);
+  delete g.marks[g.sans.length];
+  g.mistakes = g.mistakes.filter((m) => m.ply !== g.sans.length + 1);
+  const h = g.chess.history({ verbose: true });
+  g.lastMove = state.lastMove = h[h.length - 1] || null;
+  state.highlights = [];
+  state.arrows = [];
+  audit('play.takeback', { san });
+  renderGame();
+  const { text } = await api('/api/describe', { fen: g.chess.fen() }).catch(() => ({ text: '' }));
+  return `[board] ${playerName()} took back ${san}. It is their move again. Position now: ${text}`;
+}
+
+// Loads the game just played into review mode. Returns the review context for the coach.
+async function reviewPlayedGame({ announce = true } = {}) {
+  const g = state.game;
+  if (!g || g.sans.length < 2) return 'There is no game to review yet.';
+  if (!g.over) finishGame(g, 'unfinished', 'Game stopped');
+  const you = state.player || 'Student';
+  g.chess.header('Event', `Game against Coach Rook (${g.rating})`);
+  g.chess.header('White', g.color === 'w' ? you : 'Coach Rook');
+  g.chess.header('Black', g.color === 'b' ? you : 'Coach Rook');
+  g.chess.header('Result', { won: g.color === 'w' ? '1-0' : '0-1', lost: g.color === 'w' ? '0-1' : '1-0', drew: '1/2-1/2', unfinished: '*' }[g.result]);
+  const review = await loadReview(g.chess.pgn(), g.color, { announce });
+  if (!review) return 'The game could not be analyzed.';
+  return `${review.context} This is the game they just played against you. Give your overall impression in a sentence and offer to start with the first key moment.`;
+}
+
+// What the coach needs when a call starts with a game already on the board.
+async function gameContext() {
+  const g = state.game;
+  const { text } = await api('/api/describe', { fen: g.chess.fen() }).catch(() => ({ text: '(piece list unavailable)' }));
+  return (
+    `[board] A game against you is on the board. Your strength for this game: ${g.rating}. ${playerName()} plays ${sideName(g.color)}. ` +
+    `How to behave at this strength: ${ATTITUDE[g.rating]} Moves so far: ${g.sans.join(' ') || 'none'}. ` +
+    (g.over ? `The game is over: ${g.reason}. ` : '') +
+    `Position: ${text}`
+  );
 }
 
 // ---------------------------------------------------------------- tool calls
@@ -721,6 +1022,7 @@ const TOOL_HANDLERS = {
 
   async chess_play_solution() {
     if (state.mode === 'review') return showEngineLine();
+    if (state.mode === 'play') return 'There is no solution to play in a game. chess_show_engine_line shows what the engine would do from here.';
     return playSolution();
   },
 
@@ -732,6 +1034,19 @@ const TOOL_HANDLERS = {
   async chess_show_engine_line() {
     if (state.mode === 'review') return showEngineLine();
     return showPuzzleEngineLine();
+  },
+
+  async chess_new_game(args) {
+    const color = { white: 'w', black: 'b' }[String(args.color || '').toLowerCase()];
+    return startGame(Number(args.strength), color, { announce: false }).then((context) => `${context} Say one short line to start the game.`);
+  },
+
+  async chess_take_back() {
+    return takeBack();
+  },
+
+  async chess_review_game() {
+    return reviewPlayedGame({ announce: false });
   },
 };
 
@@ -894,6 +1209,7 @@ async function startSession() {
       briefed = true;
       audit('call.coach_joined', { session_id: ev.participant.session_id, user_name: ev.participant.user_name });
       if (state.mode === 'review' && state.review) sendContext(state.review.context);
+      else if (state.mode === 'play' && state.game) sendContext(await gameContext());
       else sendContext(await puzzleContext(puzzle()) + (state.ply ? ` Moves played so far: ${state.sanLog.join(' ')}.` : ''));
     });
     call.on('participant-left', (ev) => {
@@ -937,7 +1253,9 @@ function cancelStart() {
 }
 
 function sessionSummary() {
-  return state.sessionLog ? { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review } : null;
+  if (!state.sessionLog) return null;
+  const games = state.sessionLog.games.map((g) => ({ rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), mistakes: costliest(g) }));
+  return { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review, games };
 }
 
 // Closing the tab mid-session: still end the conversation and save the note.
@@ -1041,6 +1359,9 @@ function setupSim() {
     if (which === 'solution') fake('chess_play_solution', {});
     if (which === 'moment') fake('chess_goto_moment', { moment: 1 });
     if (which === 'line') fake('chess_show_engine_line', {});
+    if (which === 'game') fake('chess_new_game', { strength: 1000, color: 'white' });
+    if (which === 'takeback') fake('chess_take_back', {});
+    if (which === 'reviewgame') fake('chess_review_game', {});
   });
 }
 
@@ -1093,6 +1414,7 @@ async function boot() {
   document.querySelectorAll('[data-tab]').forEach((t) =>
     t.addEventListener('click', () => {
       if (t.dataset.tab === 'puzzle') loadPuzzle({ which: 'retry' });
+      else if (t.dataset.tab === 'play') showPlay();
       else {
         setMode('review');
         if (state.review) gotoPly(state.reviewPly);
@@ -1116,6 +1438,27 @@ async function boot() {
       loadReview(text, b.dataset.side);
     })
   );
+  const strength = () => RATINGS[Number($('strength').value)];
+  $('strength').value = RATINGS.indexOf(storedStrength());
+  $('strengthOut').textContent = strength();
+  $('strength').addEventListener('input', () => ($('strengthOut').textContent = strength()));
+  $('gameSetup').addEventListener('submit', (e) => {
+    e.preventDefault();
+    startGame(strength(), $('gameColor').value);
+  });
+  $('takeBack').addEventListener('click', async () => {
+    const told = await takeBack();
+    if (told.startsWith('[board]') && state.conversationId) sendContext(told);
+  });
+  $('resign').addEventListener('click', () => {
+    const g = state.game;
+    if (g && !g.over) sendRespond(finishGame(g, 'lost', 'Resigned'));
+  });
+  $('reviewGame').addEventListener('click', () => reviewPlayedGame());
+  $('newGame').addEventListener('click', () => {
+    state.game = null;
+    showPlay();
+  });
   $('navStart').addEventListener('click', () => gotoPly(0));
   $('navPrev').addEventListener('click', () => gotoPly(state.reviewPly - 1));
   $('navNext').addEventListener('click', () => gotoPly(state.reviewPly + 1));

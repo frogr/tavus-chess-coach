@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { tavus } = require('./tavus');
 const { httpError } = require('./errors');
 const { themeNames } = require('./puzzles');
+const { RATINGS } = require('./play');
 
 const MAX_PINNED = 30; // Tavus limit per store
 const NOTE_PREFIX = 'Session note';
@@ -49,6 +50,8 @@ const THEMES = new Set(themeNames);
 const SAN = /^(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?)[+#]?$/;
 const label = (v, max) => String(v ?? '').replace(/[^\p{L}\p{N} .,;:?!'()+#=\/-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
+const RESULTS = ['won', 'lost', 'drew', 'unfinished'];
+
 function sanitizeSummary(summary) {
   const src = summary && typeof summary === 'object' ? summary : {};
   const puzzles = (Array.isArray(src.puzzles) ? src.puzzles : [])
@@ -70,7 +73,17 @@ function sanitizeSummary(summary) {
       tries: (Array.isArray(r.tries) ? r.tries : []).slice(0, 40).map((t) => ({ ok: Boolean(t && t.ok === true) })),
     };
   }
-  return { puzzles, review };
+  const games = (Array.isArray(src.games) ? src.games : [])
+    .filter((g) => g && typeof g === 'object' && RATINGS.includes(g.rating) && ['w', 'b'].includes(g.color) && RESULTS.includes(g.result))
+    .slice(0, 6)
+    .map((g) => ({
+      rating: g.rating,
+      color: g.color,
+      result: g.result,
+      moves: Math.max(0, Math.min(300, Math.floor(Number(g.moves) || 0))),
+      mistakes: (Array.isArray(g.mistakes) ? g.mistakes : []).map((m) => label(m, 24)).filter(Boolean).slice(0, 3),
+    }));
+  return { puzzles, review, games };
 }
 
 async function findStore(palId, tag) {
@@ -123,6 +136,13 @@ function sessionNote(summary, date = new Date()) {
     parts.push(
       `reviewed their game ${r.game}; key mistakes were ${(r.mistakes || []).slice(0, 3).join('; ') || 'none found'}` +
         (r.tries && r.tries.length ? `; found the better move at ${found} of ${r.tries.length} moments tried` : '')
+    );
+  }
+  for (const g of (summary.games || []).filter((g) => g.moves >= 3).slice(-2)) {
+    const outcome = g.result === 'unfinished' ? `stopped after ${g.moves} moves` : `${g.result} in ${g.moves} moves`;
+    parts.push(
+      `played the coach at strength ${g.rating} as ${g.color === 'w' ? 'White' : 'Black'}: ${outcome}` +
+        (g.mistakes.length ? `; biggest mistakes ${g.mistakes.join(', ')}` : '')
     );
   }
   if (!parts.length) return null;

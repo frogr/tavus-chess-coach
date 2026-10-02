@@ -11,6 +11,7 @@ const { describePosition, summarizeAnalysis, scoreWords } = require('./chessText
 const { tavus } = require('./tavus');
 const { nextPuzzle } = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
+const { playTurn, levelFor } = require('./play');
 const { cleanName, participantTag, getMemory, recordSession } = require('./memory');
 const { httpError } = require('./errors');
 const { createLimiter } = require('./limits');
@@ -295,6 +296,15 @@ const routes = {
     if (typeof move !== 'string' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)) throw httpError(400, 'That is not a move.');
     budget(limits.engine, ip, 'engine requests');
     return judgeMove(fen, move);
+  },
+
+  // A game against the coach: judges the student's move (when there is one) and answers it.
+  'POST /api/play': async ({ fen: rawFen, move, rating }, { ip }) => {
+    const fen = cleanFen(rawFen);
+    levelFor(rating);
+    if (move !== undefined && move !== null && (typeof move !== 'string' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move))) throw httpError(400, 'That is not a move.');
+    budget(limits.engine, ip, 'engine requests');
+    return playTurn(fen, move || null, rating);
   },
 
   'POST /api/session': async ({ player, key, code }, { ip, clientId }) => {

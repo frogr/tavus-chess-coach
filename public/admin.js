@@ -64,6 +64,8 @@ function gist(e) {
   if (e.kind.startsWith('tavus.webhook')) return clip(d.properties || d, 140);
   if (e.kind.startsWith('feed:')) return clip(d.text || d.detail || '', 140);
   if (e.kind === 'puzzle.move') return `${d.san} on "${d.id}" · ${d.correct ? 'correct' : 'wrong'}`;
+  if (e.kind === 'play.move' || e.kind === 'play.reply') return `${e.kind === 'play.move' ? 'student' : 'coach'} ${d.san} · strength ${d.rating}`;
+  if (e.kind === 'play.judge') return `${d.san} · ${d.class || 'fine'}${d.class ? ` · best ${d.best}` : ''}`;
   if (e.kind === 'review.try') return `${d.san} at moment ${d.moment} · ${d.ok ? 'accepted' : 'rejected'}`;
   return clip(d, 140);
 }
@@ -164,6 +166,7 @@ function boardSummary(summary) {
     if (p.hints) bits.push(`${p.hints} hint${p.hints > 1 ? 's' : ''}`);
     return `${p.theme}: ${bits.join(', ')}`;
   });
+  for (const g of summary.games || []) parts.push(`Game vs coach at ${g.rating} as ${g.color === 'w' ? 'White' : 'Black'}: ${g.result}, ${g.moves} moves${g.mistakes?.length ? ` (${g.mistakes.join(', ')})` : ''}`);
   if (summary.review) parts.push(`Review of ${summary.review.game}: ${summary.review.tries?.length || 0} tries`);
   return parts.join('\n');
 }
@@ -174,7 +177,7 @@ const clamped = (tag, text) => h(tag, { class: 'clamp', onclick: (e) => e.curren
 const GROUPS = [
   ['All', () => true],
   ['Conversation', (e) => (e.kind === 'tavus.received' || e.kind === 'tavus.sent') && !/streaming$/.test(e.data?.event_type || '')],
-  ['Board', (e) => /^(puzzle|review)\./.test(e.kind)],
+  ['Board', (e) => /^(puzzle|review|play)\./.test(e.kind)],
   ['Call', (e) => e.kind.startsWith('call.')],
   ['Tavus API', (e) => e.kind.startsWith('tavus.api')],
   ['Webhooks', (e) => e.kind.startsWith('tavus.webhook')],

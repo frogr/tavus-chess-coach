@@ -120,7 +120,7 @@ function memoryStore() {
         const v = visits.get(e.client_id) || { client_id: e.client_id, first: e.ts, last: e.ts, events: 0, moves: 0, conversation_id: null, ip: null };
         v.last = e.ts;
         v.events++;
-        if (e.kind === 'puzzle.move' || e.kind === 'review.try') v.moves++;
+        if (e.kind === 'puzzle.move' || e.kind === 'review.try' || e.kind === 'play.move') v.moves++;
         v.conversation_id = e.conversation_id || v.conversation_id;
         v.ip = e.ip || v.ip;
         visits.set(e.client_id, v);
@@ -204,7 +204,7 @@ function postgresStore(url) {
     async listVisits({ limit = 100 } = {}) {
       const { rows } = await pool.query(
         `select client_id, min(ts) as first, max(ts) as last, count(*)::int as events,
-                count(*) filter (where kind in ('puzzle.move', 'review.try'))::int as moves,
+                count(*) filter (where kind in ('puzzle.move', 'review.try', 'play.move'))::int as moves,
                 max(conversation_id) as conversation_id, max(ip) as ip
          from audit_events where client_id is not null
          group by client_id order by max(id) desc limit $1`,
