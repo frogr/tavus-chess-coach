@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Coach Rook · A video chess coach</title>
-  <meta name="description" content="A live video chess coach that watches your board. Solve puzzles, play the coach, or review your own games with a coach who sees every move and checks its advice with Stockfish." />
+  <title>Coach Rook · A chess coach that watches your board</title>
+  <meta name="description" content="Most chess software gives you the answer. Coach Rook helps you find it. Puzzles, practice games and game review with a video coach who sees every move." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
@@ -14,123 +14,185 @@
 <body class="about">
   <header class="topbar">
     <a class="brand" href="/about"><span class="logo">♜</span> Coach Rook</a>
-    <a class="cta small" href="/">Open the board</a>
+    <a class="cta small" href="/">Start a session</a>
   </header>
 
   <main>
+    <!-- 1. Hero -->
     <section class="hero">
+      <p class="kicker">Meet Coach Rook</p>
       <h1>A chess coach that watches your board.</h1>
-      <p class="lead">Coach Rook joins you on a video call beside a real board. Solve puzzles, play a game against the coach, or go through one of your own games. The coach sees every move you make, talks it through with you, and points at the squares it means.</p>
+      <p class="lead">Play. Think out loud. Ask questions. Coach Rook sees every move and helps you find the idea before showing you the answer.</p>
       <div class="hero-actions">
-        <a class="cta" href="/">Open the board</a>
-        <span class="aside">The board is open to anyone. The video coach needs an access code.</span>
+        <a class="cta" href="/">Start a session</a>
+        <a class="ghost" href="#how">See how it works</a>
       </div>
+      <p class="modes">Puzzles · Practice games · Game review</p>
     </section>
 
-    <figure class="shot" aria-label="A puzzle session: the coach on video next to the board with one knight highlighted, and the notebook of past sessions below the video">
-      <div class="shot-side">
-        <div class="shot-coach">
-          <img src="/coach.jpg" width="876" height="584" alt="Coach Rook on a video call" />
-          <p class="caption">Look at this knight. Where can it give check?</p>
-        </div>
-        <div class="notebook">
-          <header><h3>Notebook</h3><span class="muted">Sam</span></header>
-          <ul>
-            <li>Session note 2026-09-28: solved first try: back-rank mate, pin. fork: tried Qd5, Nc7 first, 1 hint, then solved it.</li>
-            <li>Session note 2026-09-24: reviewed their game; key mistakes were 10... cxb5? (mistake, engine wanted Qb4+); found the better move at 1 of 1 moments tried.</li>
-          </ul>
-        </div>
+    <figure class="shot" aria-label="A practice game: the coach on video beside the board, with the student's attacked knight highlighted">
+      <div class="shot-coach">
+        <img src="/coach.jpg" width="876" height="584" alt="The coach on a video call" />
+        <p class="caption">Before I tell you — what's attacking your knight?</p>
       </div>
-      <div class="shot-board">
-        <div class="eyebrow">Puzzle 3 · ●●○</div>
-        <div class="shot-title">White to move</div>
-        <div id="puzzleBoard" class="board" inert><div class="promo"><div></div></div></div>
+      <div>
+        <div class="eyebrow">vs Anna · 1500</div>
+        <div class="shot-title">Black to move</div>
+        <div id="heroBoard" class="board" inert><div class="promo"><div></div></div></div>
       </div>
     </figure>
 
-    <section class="row">
-      <div class="copy">
-        <h2>Puzzles</h2>
-        <p>About 4,800 positions from the Lichess puzzle database, sorted into 20 tactical themes and three levels. Solve two cleanly and the next one is harder. Struggle and it eases off.</p>
-        <p>Say what you want out loud: an easier one, a harder one, or a theme by name. When you're stuck, hints come in steps. First a question, then a highlighted piece, then the name of the pattern. You get the answer only when you ask for it.</p>
+    <!-- 2. The contrast -->
+    <section id="how" class="contrast">
+      <h2>Seeing the best move isn't the same as learning it.</h2>
+      <div class="loops">
+        <div class="loop passive">
+          <p class="loop-name">The usual review</p>
+          <ol>
+            <li><span class="mark">??</span> Blunder</li>
+            <li>Best move</li>
+            <li>Engine line</li>
+            <li>Close review</li>
+          </ol>
+        </div>
+        <div class="loop active">
+          <p class="loop-name">With Coach Rook</p>
+          <ol>
+            <li>Make a move</li>
+            <li>Get a question</li>
+            <li>Try again</li>
+            <li>Understand why</li>
+          </ol>
+        </div>
       </div>
-      <ul class="themes" aria-label="Puzzle themes">
-        <li>Smothered mate</li><li>Back-rank mate</li><li>Double check</li><li>Discovered check</li><li>Discovered attack</li>
-        <li>Skewer</li><li>Pin</li><li>Fork</li><li>Deflection</li><li>Attraction</li>
-        <li>Removing the defender</li><li>Trapped piece</li><li>In-between move</li><li>Clearance</li><li>Interference</li>
-        <li>X-ray</li><li>Promotion</li><li>Hanging piece</li><li>Mate in one</li><li>Mate in two</li>
-      </ul>
     </section>
 
-    <section class="row flip">
+    <!-- 3. Three product stories -->
+    <section class="story">
       <div class="copy">
-        <h2>Play the coach</h2>
-        <p>A full game against Coach Rook at one of six strengths. At the low end it teaches while it plays. At the top it is the engine at full strength, playing to win.</p>
-        <p>Ask about the position at any point and you get an engine-checked answer. You can take moves back, and when the game ends it goes straight into review.</p>
+        <p class="kicker">Puzzles</p>
+        <h2>Hints that don't ruin the puzzle.</h2>
+        <p>Stuck? Say so. Help comes one step at a time, and each step leaves you something to find.</p>
+        <ol class="ladder">
+          <li><b>A question.</b> "What is your knight standing in front of?"</li>
+          <li><b>A highlighted piece.</b> The coach points. You look.</li>
+          <li><b>The pattern's name.</b> "Think clearance."</li>
+          <li><b>The solution.</b> Only when you ask for it.</li>
+        </ol>
       </div>
-      <dl class="levels" aria-label="Coach strengths">
-        <div><dt>500</dt><dd>Plays like a beginner. Warns you about threats and offers take-backs.</dd></div>
-        <div><dt>1000</dt><dd>A casual player. Explains each mistake and offers a take-back.</dd></div>
-        <div><dt>1500</dt><dd>A club player. Points out mistakes after they happen.</dd></div>
-        <div><dt>2000</dt><dd>A strong club player. Comments only on turning points.</dd></div>
-        <div><dt>2500</dt><dd>Master strength. Explains only when asked.</dd></div>
-        <div><dt>3000</dt><dd>Full engine strength. Gives nothing away until the game is over.</dd></div>
-      </dl>
+      <figure class="ui">
+        <div class="eyebrow">Puzzle 7 · rated 1213</div>
+        <div class="shot-title">White to move</div>
+        <div id="puzzleBoard" class="board" inert><div class="promo"><div></div></div></div>
+      </figure>
     </section>
 
-    <section class="row">
+    <section class="story flip">
       <div class="copy">
-        <h2>Game review</h2>
-        <p>Paste a PGN or a Lichess link. Stockfish goes through every move and picks out the ones that cost you the most.</p>
-        <p>The coach takes you back to the position before each one, asks what you were thinking, and lets you try again on the board. Any move that holds the position counts, and the engine's first choice is only one of them. If you want it, the coach plays the better line out in front of you.</p>
+        <p class="kicker">Play</p>
+        <h2>Play someone who can explain the game.</h2>
+        <p>Pick a strength from 500 to 3000. Ask about the position at any point. Take a move back.</p>
+        <p>The coaching thins out as the rating climbs. At 500 you get warned before a threat lands. At 3000 you get the engine, and very little conversation until it's over.</p>
+        <div class="roster" aria-label="Four coaches to choose from">
+          <img src="/coaches/anna.jpg" width="240" height="240" alt="Anna" />
+          <img src="/coaches/victor.jpg" width="240" height="240" alt="Victor" />
+          <img src="/coaches/helen.jpg" width="240" height="240" alt="Helen" />
+          <img src="/coaches/darius.jpg" width="240" height="240" alt="Darius" />
+          <span>Four coaches. Pick one.</span>
+        </div>
       </div>
-      <figure class="review-shot" aria-label="A reviewed game: a mistake marked on the board with an arrow showing the better move">
+      <figure class="ui">
+        <div class="game-setup" inert>
+          <div class="strength">Coach strength <output>1500</output></div>
+          <input type="range" min="0" max="5" step="1" value="2" aria-hidden="true" tabindex="-1" />
+          <div class="ticks"><span>500</span><span>1000</span><span>1500</span><span>2000</span><span>2500</span><span>3000</span></div>
+        </div>
+        <dl class="levels">
+          <div><dt>500</dt><dd>Warns you about threats. Offers take-backs.</dd></div>
+          <div><dt>1000</dt><dd>Explains each mistake. Offers a take-back.</dd></div>
+          <div><dt>1500</dt><dd>Points out mistakes after they happen.</dd></div>
+          <div><dt>2000</dt><dd>Comments on turning points only.</dd></div>
+          <div><dt>2500</dt><dd>Explains when asked.</dd></div>
+          <div><dt>3000</dt><dd>Says little until the game is over.</dd></div>
+        </dl>
+      </figure>
+    </section>
+
+    <section class="story">
+      <div class="copy">
+        <p class="kicker">Review</p>
+        <h2>Don't watch your mistake. Replay it.</h2>
+        <p>Paste a game. The board goes back to the move before each one that cost you. The coach asks what you were thinking. Then you try again.</p>
+        <p>Any move that holds the position counts. The engine's first choice is one of them, and often there are others.</p>
+      </div>
+      <figure class="ui">
         <div class="eyebrow">1-0 · Paris Opera</div>
-        <div class="shot-title">Morphy vs Duke Karl / Count Isouard</div>
+        <div class="shot-title">You played 10... cxb5</div>
         <div id="reviewBoard" class="board" inert><div class="promo"><div></div></div></div>
         <div class="review-meta">
           <span class="chip inaccuracy">1. 6... Nf6?!</span>
           <span class="chip mistake">2. 10... cxb5?</span>
-          <span class="eval">10... cxb5? · eval +8.1</span>
         </div>
       </figure>
     </section>
 
-    <section class="facts">
-      <div>
-        <h3>Checked by the engine</h3>
-        <p>The coach doesn't calculate. Before it calls a move good or bad it asks Stockfish, and the board reports each move you play along with what that move allowed.</p>
-      </div>
-      <div>
-        <h3>Points at the board</h3>
-        <p>Highlights and arrows appear on your board while the coach talks, so "this knight" means a square you can see.</p>
-      </div>
-      <div>
-        <h3>Remembers you</h3>
-        <p>Give your name and it keeps a notebook: what you solved, what took a few tries, which mistakes came up in your games. The next session starts from there.</p>
-      </div>
-      <div>
-        <h3>Four coaches</h3>
-        <p>Anna is patient, Victor is a dry old club hand, Helen makes you calculate, Darius wants a fight. Pick one before each session. They all share your notebook.</p>
-      </div>
-      <div>
-        <h3>A puzzle rating</h3>
-        <p>Every puzzle moves your rating up or down, and clean solves build a streak. The next puzzle is picked to match.</p>
-      </div>
-      <div>
-        <h3>Waits while you think</h3>
-        <p>Turn-taking is set for long silences. If you go quiet for a while you get a nudge, and the answer stays hidden.</p>
+    <!-- 4. Trust -->
+    <section class="trust">
+      <h2>The engine checks. Rook teaches.</h2>
+      <p class="lead">The coach is never trusted to work out chess by itself. The board keeps the position. Stockfish judges the moves. The coach's job is to ask, explain and encourage.</p>
+      <div class="handoff" aria-label="What the coach is given before it speaks">
+        <div>
+          <span class="label">Board</span>
+          <code>Austin played Qd6. Queen from d1 to d6.</code>
+        </div>
+        <div>
+          <span class="label">Stockfish</span>
+          <code>Mistake. Bd3 kept it equal (−0.1). Now Black is winning (−3.4).</code>
+        </div>
+        <div class="says">
+          <span class="label">Coach</span>
+          <p>"Look at your bishop on e4. What happens to it now?"</p>
+        </div>
       </div>
     </section>
 
+    <!-- 5. Memory -->
+    <section class="story flip">
+      <div class="copy">
+        <p class="kicker">Memory</p>
+        <h2>Your next lesson starts where the last one ended.</h2>
+        <p>After each session the board writes down what happened: what you solved cleanly, what needed hints, which mistakes came up in your games. The coach reads it before saying hello.</p>
+      </div>
+      <figure class="ui">
+        <div class="notebook">
+          <header><h3>Notebook</h3><span class="muted">Austin</span></header>
+          <ul>
+            <li>Session note 2026-10-02: played the coach at strength 1500 as White: lost in 21 moves; biggest mistakes 14. Qd6?.</li>
+            <li>Session note 2026-10-01: solved first try: back-rank mate, pin. fork: tried Qd5, Nc7 first, 1 hint, then solved it.</li>
+            <li>Session note 2026-09-28: reviewed their game; key mistakes were 10... cxb5?; found the better move at 1 of 1 moments tried.</li>
+          </ul>
+        </div>
+      </figure>
+    </section>
+
+    <!-- 6. Patience -->
+    <section class="patience">
+      <p class="clock" aria-hidden="true">0:47</p>
+      <h2>A coach that knows when to shut up.</h2>
+      <p>Chess takes thinking time. Rook waits while you calculate instead of filling every silence.</p>
+    </section>
+
+    <!-- 7. Final call -->
     <section class="closing">
-      <a class="cta" href="/">Open the board</a>
+      <h2>Don't just see the move. Find it.</h2>
+      <a class="cta" href="/">Start a session</a>
+      <p>Practice puzzles, play the coach, or review one of your own games.</p>
     </section>
   </main>
 
   <footer class="foot">
-    <span>Built on <a href="https://www.tavus.io">Tavus</a>, <a href="https://stockfishchess.org">Stockfish</a> and the <a href="https://database.lichess.org/#puzzles">Lichess puzzle database</a>.</span>
-    <a href="https://github.com/frogr/tavus-chess-coach">Source</a>
+    <span>The board is open to anyone. The video coach needs an access code.</span>
+    <span>Built on <a href="https://www.tavus.io">Tavus</a>, <a href="https://stockfishchess.org">Stockfish</a> and the <a href="https://database.lichess.org/#puzzles">Lichess puzzle database</a>. <a href="https://github.com/frogr/tavus-chess-coach">Source</a></span>
   </footer>
 
   <script type="module" src="/about.js"></script>
