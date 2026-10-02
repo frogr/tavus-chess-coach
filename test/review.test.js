@@ -75,5 +75,6 @@ test('judgeMove accepts the winning move, rejects a weak one, and 400s on an ill
   const weak = await judgeMove('4k3/1q6/8/8/4N3/8/5PPP/6K1 w - - 0 1', 'g1h1');
   assert.equal(weak.ok, false);
   assert.equal(weak.bestSan, 'Nd6+');
+  assert.ok(weak.answerLine.length > 0, 'a move that is not mate comes with the engine\'s answer to it');
   await assert.rejects(judgeMove(fen, 'd1h5'), { status: 400 });
 });

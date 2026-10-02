@@ -9,7 +9,7 @@ A live video chess coach built on Tavus CVI. You work on a real board while a co
 Three modes:
 
 - **Puzzles.** About 4,800 tactics from the Lichess database in 20 themes. Hints escalate from a question, to a highlighted piece, to the pattern's name, to the answer only on request. A puzzle rating and streak move after every puzzle.
-- **Play.** A full game against the coach at one of six strengths, 500 to 3000. The coach comments, answers questions about the position and offers take-backs, and says less as the rating goes up. Afterwards the game goes straight into review.
+- **Play.** A full game against the coach at one of six strengths, 500 to 3000. The coach comments on the ideas in the position, answers questions about it, and says less as the rating goes up. Afterwards the game goes straight into review.
 - **Review.** Paste a PGN or a Lichess link, or load recent games by chess.com username. Stockfish scores every move and picks out the costliest. The coach takes you back to the position before each one, asks what you were thinking, and lets you find a better move before showing the engine's line.
 
 There are four coaches to choose from, each with its own face, voice and manner. The coach remembers you between sessions.
@@ -145,7 +145,7 @@ Traffic runs in two directions, both over the Tavus interaction protocol:
 | `chess_goto_moment` | Review: jumps to key moment N, the position before the mistake, and lets the student try again | `silent` / `generate_response` | The coach drives the pacing; the board does the bookkeeping |
 | `chess_show_engine_line` | Animates the engine's line, then returns to the position | `static_filler` / `generate_response` | "Watch this" while the pieces move, then the coach explains |
 | `chess_new_game` | Starts a game against the coach at a strength and color | `silent` / `generate_response` | "Play me, but go easy" works by voice |
-| `chess_take_back` | Undoes the student's last move and the coach's answer | `silent` / `generate_response` | The coach offers take-backs at low strengths |
+| `chess_take_back` | Undoes the student's last move and the coach's answer | `silent` / `generate_response` | Only when the student asks; the coach never offers one |
 | `chess_review_game` | Loads the game just played into review | `static_filler` / `generate_response` | The engine pass takes a few seconds |
 
 The definitions and the system prompt are in `server/pal-config.js`.
@@ -170,7 +170,7 @@ A session runs for up to `MAX_CALL_SECONDS`. The time left is shown in the call 
 - **Strength.** `server/play.js` weakens Stockfish the way Lichess and chess.com levels do: a shallower search, then a weighted pick among the engine's top candidates, where worse moves get more weight as the rating drops. At 500 and 1000 there is also a small chance of a move played without looking. 3000 is the engine's best move. The ratings are labels for these settings, not measured Elo.
 - **One request per move.** `POST /api/play` judges the student's move with the same win-chance scoring the review uses, answers it, and returns the position in words.
 - **The coach hears every move but speaks on few.** Each move goes to the PAL as silent context with the engine's verdict. It is asked to speak when the student blunders (or makes a mistake, below 2500), after a run of quiet moves, and when the game ends.
-- **Attitude follows strength.** The message that starts a game tells the coach how to behave: teaching and offering take-backs at 500, competing and saying little at 3000. Questions get an engine-checked answer at every strength.
+- **Attitude follows strength.** The message that starts a game tells the coach how to behave: easygoing and talkative at 500, competing and saying little at 3000. The coach is told the engine's lines in neutral words and asked for ideas (what a move left open, what the stronger plan was after), never grades or take-back offers. Questions get an engine-checked answer at every strength.
 
 ## Game review
 

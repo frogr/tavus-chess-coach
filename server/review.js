@@ -234,9 +234,14 @@ async function judgeMove(fen, uci, { movetime = 1000 } = {}) {
   const before = await analyze(fen, 14, { multipv: 1, movetime });
   const bestCp = whiteCp(before.lines[0], fen);
   let afterCp;
+  let answerLine = [];
   if (c.isCheckmate()) afterCp = mover === 'w' ? 10000 : -10000;
   else if (c.isGameOver()) afterCp = 0;
-  else afterCp = whiteCp((await analyze(c.fen(), 14, { multipv: 1, movetime, newGame: false })).lines[0], c.fen());
+  else {
+    const after = await analyze(c.fen(), 14, { multipv: 1, movetime, newGame: false });
+    afterCp = whiteCp(after.lines[0], c.fen());
+    answerLine = uciLineToSan(c.fen(), after.lines[0].pv, 4);
+  }
   const loss = Math.max(0, winPct(sign * bestCp) - winPct(sign * afterCp));
   const bestSan = uciLineToSan(fen, [before.bestmove])[0];
   return {
@@ -249,6 +254,8 @@ async function judgeMove(fen, uci, { movetime = 1000 } = {}) {
     evalAfter: evalWordsWhite(afterCp),
     evalBest: evalWordsWhite(bestCp),
     bestLine: uciLineToSan(fen, before.lines[0].pv, 6),
+    // How the engine would answer the move that was played: what it allows.
+    answerLine,
   };
 }
 

@@ -819,13 +819,16 @@ const RATINGS = [500, 1000, 1500, 2000, 2500, 3000];
 const MARK = { inaccuracy: '?!', mistake: '?', blunder: '??' };
 // How the coach should carry itself at each strength. Sent when a game starts.
 const ATTITUDE = {
-  500: 'You are playing like a beginner on purpose. Teach while you play: warn about a threat before it lands, praise good ideas, and when they blunder explain it kindly and offer a take-back.',
-  1000: 'You are playing like a casual player. Be encouraging. When they make a mistake, say what it allowed and offer a take-back.',
-  1500: 'You are playing like a club player. Friendly sparring: point out a mistake in a sentence after it happens, and give hints when asked. Take-backs only if they ask.',
+  500: 'You are playing like a beginner on purpose. Easygoing and generous: mention a threat before it lands, say what a good move of theirs achieved, and when a move leaves something loose, say what and why in a sentence, then play on.',
+  1000: 'You are playing like a casual player. Easygoing: when a move lets something through, say what it let through and what the stronger idea was after, then play on.',
+  1500: 'You are playing like a club player. Friendly sparring: when the game turns, say in a sentence what changed and why. Hints when asked.',
   2000: 'You are playing like a strong club player and this is a serious game. Speak less, comment only on turning points, and allow yourself a little competitive banter. Hints only when asked.',
   2500: 'You are playing at master strength and you want to win. Be confident and brief. Explain only when asked, and make them work for it.',
   3000: 'You are playing at full engine strength and giving nothing away. Dry, competitive, respectful. Still answer questions honestly when asked, and be generous once the game is over.',
 };
+// How the board describes a costly move to the coach. Deliberately not "mistake" or "blunder":
+// the coach repeats the words it is given.
+const COST = { inaccuracy: 'slightly loose', mistake: 'this gave up a good part of their position', blunder: 'this gave up a lot' };
 // How many of the student's moves may pass before the coach says something unprompted.
 const QUIET_MOVES = [4, 4, 6, 6, 9, 9];
 
@@ -1004,8 +1007,11 @@ async function gameMove(from, to, promotion = 'q') {
   }
   audit('play.judge', { san: move.san, class: j.class, lossPct: j.lossPct, best: j.bestSan });
   const text =
-    `[board] Game, move ${moveNo}: ${said}. Engine verdict: ${j.class || (move.san === j.bestSan ? 'the best move' : 'a good move')}. ` +
-    (j.class ? `Better was ${j.bestSan} (${j.bestWords}). ` : '') +
+    `[board] Game, move ${moveNo}: ${said}. Engine: ${j.class ? COST[j.class] : move.san === j.bestSan ? "the engine's first choice" : 'a sound move'}. ` +
+    (j.class
+      ? `The engine preferred ${j.bestSan} (${j.bestWords}), continuing ${j.bestLine.join(' ')}. ` +
+        (j.answerLine?.length ? `Its strongest answer to the move played: ${j.answerLine.join(' ')}. ` : '')
+      : '') +
     `Evaluation after it: ${j.evalAfter}. ` +
     (turn.reply ? `You answered ${turn.reply.san} (${turn.reply.words}). ` : '') +
     `Position now: ${turn.position}`;
@@ -1015,18 +1021,19 @@ async function gameMove(from, to, promotion = 'q') {
 
   const level = RATINGS.indexOf(g.rating);
   g.quiet += 1;
-  if (j.class === 'blunder' || (j.class === 'mistake' && level <= 3)) {
+  // A costly move gets a remark, but not two moves running: nobody wants a comment on every slip.
+  if (g.quiet >= 2 && (j.class === 'blunder' || (j.class === 'mistake' && level <= 3))) {
     g.quiet = 0;
     const ask =
-      level <= 1
-        ? 'React in one or two sentences: say in plain words what their move allowed, and offer a take-back.'
-        : level <= 3
-          ? 'React in one sentence: say what their move allowed.'
-          : 'One short, competitive remark. Explain only if they ask.';
+      level <= 3
+        ? `In one or two relaxed sentences, say what the move leaves open (name the pieces and squares from the engine's lines)${level <= 1 ? ' and what the stronger idea was after' : ''}. No grading words, no take-back offer. Then carry on with the game.`
+        : 'One short, competitive remark. Explain only if they ask.';
     sendRespond(`${text} ${ask}`);
   } else if (g.quiet >= QUIET_MOVES[level]) {
     g.quiet = 0;
-    sendRespond(`${text} Say one short thing about how the game is going, in character for this strength.`);
+    sendRespond(
+      `${text} Share one concrete observation in a sentence: the idea behind your last move, something their recent moves did well, or a piece or square that matters now. Keep it in character for this strength.`
+    );
   } else {
     sendContext(text);
   }
