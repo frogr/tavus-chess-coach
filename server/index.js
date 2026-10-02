@@ -228,6 +228,12 @@ function requirePal() {
   return cfg;
 }
 
+const OPENERS = {
+  puzzle: { greeting: "There's a puzzle on the board. Take a look and tell me what jumps out at you.", first: 'get them started on the puzzle on the board.' },
+  play: { greeting: "Up for a game? Pick a strength and I'll play you.", first: 'offer them a game against you; they pick your strength on the board, or you can start one with chess_new_game.' },
+  review: { greeting: "Load one of your games and we'll go through it together.", first: 'ask them to load one of their games so you can go through it together.' },
+};
+
 const routes = {
   // Liveness for the host's health check: must answer instantly, even mid-setup.
   'GET /healthz': async () => ({ ok: true, commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || undefined }),
@@ -307,7 +313,7 @@ const routes = {
     return playTurn(fen, move || null, rating);
   },
 
-  'POST /api/session': async ({ player, key, code }, { ip, clientId }) => {
+  'POST /api/session': async ({ player, key, code, mode }, { ip, clientId }) => {
     checkCode(code, ip);
     budget(limits.session, ip, 'sessions');
     await palSettled();
@@ -324,6 +330,8 @@ const routes = {
     const recent = notes.filter((n) => n.startsWith('Session note')).slice(-3);
     const returning = recent.length > 0;
 
+    // The opener fits what the student has on screen: a puzzle, a game against the coach, or a review.
+    const opener = Object.hasOwn(OPENERS, mode) ? OPENERS[mode] : OPENERS.puzzle;
     const context = [
       name ? `The student's name is ${name}.` : null,
       returning
@@ -331,15 +339,11 @@ const routes = {
           `Open by greeting them by name and referencing one specific thing from the most recent note (what they nailed or what tripped them up), ` +
           `then propose what to work on today, e.g. a puzzle on the theme they struggled with (use chess_load_puzzle with that theme).`
         : name
-          ? 'This is their first session with you. Welcome them and get them started on the puzzle on the board.'
+          ? `This is their first session with you. Welcome them and ${opener.first}`
           : null,
     ].filter(Boolean).join(' ');
 
-    const greeting = returning
-      ? null
-      : name
-        ? `Hey ${name}, I'm Coach Rook. There's a puzzle on the board. Take a look and tell me what jumps out at you.`
-        : undefined;
+    const greeting = returning ? null : `Hey${name ? ` ${name}` : ''}, I'm Coach Rook. ${opener.greeting}`;
     const convo = await tavus('POST', '/conversations', {
       pal_id: cfg.pal_id,
       // Tavus posts conversation events (transcript, perception analysis, shutdown) here for the audit log.

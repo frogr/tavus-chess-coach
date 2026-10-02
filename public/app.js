@@ -1184,7 +1184,7 @@ async function startSession() {
   const cancelled = () => state.attempt !== attempt;
   try {
     if (!window.Daily) throw new Error('Video failed to load. Reload the page.');
-    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim() });
+    const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim(), mode: state.mode });
     created = conversation_id;
     if (cancelled()) throw new Error('Cancelled.');
     state.conversationId = conversation_id;

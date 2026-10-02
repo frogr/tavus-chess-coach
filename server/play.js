@@ -66,7 +66,8 @@ async function playTurn(fen, move, rating, random = Math.random) {
   let judge = null;
   let after = fen;
   if (move) {
-    judge = await judgeMove(fen, move);
+    // A game should move along: the verdict gets less engine time than a review does.
+    judge = await judgeMove(fen, move, { movetime: 500 });
     judge.class = judge.ok ? null : classify(judge.lossPct);
     const c = new Chess(fen);
     c.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] || 'q' });

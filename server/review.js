@@ -221,7 +221,7 @@ function reviewContext(review, studentName) {
 
 // Try-mode: the student proposes a different move at a key moment. Accept it
 // if it keeps (almost) all of the winning chances the best move keeps.
-async function judgeMove(fen, uci) {
+async function judgeMove(fen, uci, { movetime = 1000 } = {}) {
   const c = new Chess(fen);
   const mover = c.turn();
   let move;
@@ -231,12 +231,12 @@ async function judgeMove(fen, uci) {
     throw httpError(400, 'That move is not legal in this position.');
   }
   const sign = mover === 'w' ? 1 : -1;
-  const before = await analyze(fen, 14, { multipv: 1, movetime: 1000 });
+  const before = await analyze(fen, 14, { multipv: 1, movetime });
   const bestCp = whiteCp(before.lines[0], fen);
   let afterCp;
   if (c.isCheckmate()) afterCp = mover === 'w' ? 10000 : -10000;
   else if (c.isGameOver()) afterCp = 0;
-  else afterCp = whiteCp((await analyze(c.fen(), 14, { multipv: 1, movetime: 1000 })).lines[0], c.fen());
+  else afterCp = whiteCp((await analyze(c.fen(), 14, { multipv: 1, movetime, newGame: false })).lines[0], c.fen());
   const loss = Math.max(0, winPct(sign * bestCp) - winPct(sign * afterCp));
   const bestSan = uciLineToSan(fen, [before.bestmove])[0];
   return {
