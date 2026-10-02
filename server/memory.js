@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const { tavus } = require('./tavus');
 const { httpError } = require('./errors');
-const PUZZLES = require('./puzzles');
+const { themeNames } = require('./puzzles');
 
 const MAX_PINNED = 30; // Tavus limit per store
 const NOTE_PREFIX = 'Session note';
@@ -45,7 +45,7 @@ function participantTag(name, key) {
 // The session summary comes from the browser and is written into long-lived
 // memory that the PAL reads, so keep only what the board can actually produce:
 // known puzzle themes, moves in chess notation, short plain-text labels.
-const THEMES = new Set(PUZZLES.map((p) => p.theme));
+const THEMES = new Set(themeNames);
 const SAN = /^(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?)[+#]?$/;
 const label = (v, max) => String(v ?? '').replace(/[^\p{L}\p{N} .,;:?!'()+#=\/-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -53,7 +53,7 @@ function sanitizeSummary(summary) {
   const src = summary && typeof summary === 'object' ? summary : {};
   const puzzles = (Array.isArray(src.puzzles) ? src.puzzles : [])
     .filter((p) => p && typeof p === 'object' && THEMES.has(p.theme))
-    .slice(0, PUZZLES.length)
+    .slice(0, 40)
     .map((p) => ({
       theme: p.theme,
       wrong: (Array.isArray(p.wrong) ? p.wrong : []).filter((m) => typeof m === 'string' && SAN.test(m)).slice(0, 10),
@@ -109,7 +109,7 @@ function sessionNote(summary, date = new Date()) {
   const puzzles = summary.puzzles || [];
   const clean = puzzles.filter((p) => p.solved && !p.wrong.length && !p.hints && !p.gaveUp);
   const struggled = puzzles.filter((p) => p.wrong.length || p.hints || p.gaveUp);
-  if (clean.length) parts.push(`solved first try: ${clean.map((p) => p.theme).join(', ')}`);
+  if (clean.length) parts.push(`solved first try: ${[...new Set(clean.map((p) => p.theme))].join(', ')}`);
   for (const p of struggled.slice(0, 3)) {
     const bits = [];
     if (p.wrong.length) bits.push(`tried ${p.wrong.slice(0, 3).join(', ')} first`);

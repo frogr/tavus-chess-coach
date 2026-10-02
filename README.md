@@ -68,7 +68,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 ┌────────▼───────────────────────────────┐
 │  Node server                           │
 │   Stockfish (WASM) + plain-English     │──► tavusapi.com/v2 (API key stays here)
-│   puzzle set (engine-verified)         │
+│   puzzle pool (engine-verified)         │
 └────────────────────────────────────────┘
 ```
 
@@ -90,7 +90,8 @@ It's also a demanding integration test, which made it a useful one to build. Che
 
 - **The model never does chess.** It narrates, asks, encourages, and points. Correctness comes from the board (move validation) and Stockfish (evaluation). The system prompt says so explicitly, and the tools make the right path the easy one.
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)". This was the single biggest reliability lever.
-- **Every puzzle is engine-verified.** `npm run verify-puzzles` checks that each solution's first move is Stockfish's unique top choice and the line is decisive. I rejected two of my own candidates this way (one had several equally winning answers, one was a dead draw).
+- **Puzzles are drawn fresh from a pool of about 4,800.** They come from the Lichess puzzle database (CC0), filed under 20 teaching themes and three levels by rating. Each request picks a new pattern, skips puzzles this browser has already seen, and difficulty follows the student: two clean solves in a row moves up a level, giving up or two wrong tries moves down. The theme stays hidden until the puzzle is solved.
+- **Every puzzle is checked against our own engine.** The coach verifies claims with Stockfish at the strength this server runs it, so a puzzle is only kept if that engine also picks the solution's first move (`scripts/import-puzzles.js`; 4,830 of 4,858 candidates passed). `npm run verify-puzzles` spot-checks a random sample in CI.
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while you calculate, and `idle_engagement: patient` gives a gentle nudge rather than an answer when you go quiet.
 - **Memory is written from the board, not inferred from the call.** Pinned session notes come from what actually happened on the board; Tavus learned memory adds the softer context. The memory store is keyed to the student's name plus a random **notebook key** generated in their browser, so someone else typing the same name gets an empty notebook, not theirs. The key is shown in the notebook panel so it can be carried to another device.
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general STT mangles.
@@ -114,7 +115,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 
 - **Perception tool:** a Raven visual query for "the student looks frustrated or stuck" that triggers an earlier hint.
 - **Spaced repetition from memory:** schedule a theme you missed to come back two sessions later, and track each theme's hit rate over time.
-- **Real puzzle supply:** the Lichess puzzle database filtered by theme and rating, with the same verify step in the import.
+- **Rating-based progression:** track a per-student puzzle rating instead of three levels, and pick puzzles near it.
 - **Voice moves:** "knight to d6" spoken → move played, via a tool that parses the move and plays it on the board.
 - **Play a game against the coach:** Stockfish at reduced strength as the opponent, with the coach speaking up only at moments that matter (a big swing, a tactic on the board), not on every move.
 - **Real accounts:** a notebook key is a stand-in for signing in. A product would key memory to an authenticated user.
@@ -126,7 +127,10 @@ server/index.js        HTTP server: static files, /api/analyze, /api/session
 server/engine.js       Stockfish wrapper: runs the engine in a child process (engine-worker.js), serialized queue, watchdog
 server/chessText.js    positions and engine lines -> plain English
 server/pal-config.js   system prompt, greeting, tool definitions (all PAL behavior in one file)
-server/puzzles.js      6 engine-verified teaching puzzles
+server/puzzles.js      puzzle selection: theme, level, no repeats
+server/puzzle-pool.json  ~4,800 puzzles from the Lichess database (CC0), verified against our engine
+server/themes.js       the 20 tactical patterns the coach teaches
+scripts/import-puzzles.js  rebuilds the pool from the Lichess database
 server/review.js       game review: per-move engine pass, mistake scoring, key moments, try-a-move judging
 public/samples/        two sample games for the review mode
 server/setup.js        idempotent Tavus setup (tools, PAL, attach); also runs on first boot
@@ -138,11 +142,10 @@ public/app.js          puzzle and review flow, tool handlers, interaction protoc
 public/board.js        board renderer: sliding pieces, drag and click moves, arrows, badges
 public/sounds.js       synthesized move sounds (WebAudio, no audio files)
 public/admin.*         the audit dashboard
-public/puzzle-logic.mjs  which puzzle a "next / harder / theme" request loads
 public/pieces/         piece images (cburnett set, see LICENSE.txt there)
 test/                  node:test suites; test/helpers.js has the fake Tavus API
 ```
 
 ## Licenses
 
-The code in this repo is MIT. It runs [stockfish.js](https://github.com/nmrugg/stockfish.js) (GPL) as an npm dependency on the server, and the piece images in `public/pieces/` are by Colin M.L. Burnett (GPLv2+).
+The code in this repo is MIT. It runs [stockfish.js](https://github.com/nmrugg/stockfish.js) (GPL) as an npm dependency on the server, and the piece images in `public/pieces/` are by Colin M.L. Burnett (GPLv2+). The puzzles in `server/puzzle-pool.json` are from the [Lichess puzzle database](https://database.lichess.org/#puzzles) (CC0).

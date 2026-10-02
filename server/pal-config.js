@@ -1,5 +1,6 @@
 // Everything the setup script registers with Tavus lives here, so the PAL's
 // behavior is reviewable in one file and reproducible with `npm run setup`.
+const { themeNames } = require('./puzzles');
 
 const TOOLS = [
   {
@@ -52,10 +53,11 @@ const TOOLS = [
   {
     name: 'chess_load_puzzle',
     description:
-      'Change the puzzle on the board. Use "next" when the student solved it or wants a new one, ' +
+      'Put a new puzzle on the board. Puzzles are drawn fresh each time from a large pool. Use "next" when the student solved it or wants a new one ' +
+      '(the board picks a new pattern and adjusts difficulty to how they are doing), ' +
       '"retry" to reset the current puzzle, "easier" or "harder" when the difficulty should change, ' +
       'or "theme" with a theme to practice a specific pattern (for example one they struggled with last session). ' +
-      'Available themes: back-rank mate, discovered check, knight fork, skewer, smothered mate, deflection.',
+      `Available themes: ${themeNames.join(', ')}.`,
     parameters: {
       type: 'object',
       properties: {

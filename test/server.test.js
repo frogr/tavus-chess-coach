@@ -41,7 +41,7 @@ test('every file the page loads is served from this server', async () => {
   const appJs = await (await app.get('/app.js')).text();
   assert.doesNotMatch(html, /<script[^>]+src="https?:/, 'no third-party scripts');
   assert.doesNotMatch(appJs, /from 'https?:/, 'no third-party imports');
-  for (const p of ['/app.js', '/puzzle-logic.mjs', '/styles.css', '/vendor/chess.js', '/vendor/daily.js', '/pieces/wK.svg', '/pieces/bN.svg', '/samples/opera-game.pgn']) {
+  for (const p of ['/app.js', '/board.js', '/sounds.js', '/admin.js', '/styles.css', '/vendor/chess.js', '/vendor/daily.js', '/pieces/wK.svg', '/pieces/bN.svg', '/samples/opera-game.pgn']) {
     const res = await app.get(p);
     assert.equal(res.status, 200, p);
     assert.ok(Number(res.headers.get('content-length')) > 100, p);

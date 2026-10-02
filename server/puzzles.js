@@ -1,60 +1,75 @@
-// Hand-picked teaching positions. Every solution line below was checked with
-// Stockfish (depth 14-16) before it went in: the first move is the engine's
-// top choice and the line is clearly winning (forced mate or decisive material).
-// `line` alternates player move / opponent reply, in UCI.
-module.exports = [
-  {
-    id: 'back-rank',
-    title: 'The Back Rank',
-    theme: 'back-rank mate',
-    level: 1,
-    fen: '6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1',
-    line: ['d1d8'],
-    idea: "Black's king is boxed in by its own pawns on f7, g7 and h7, so a rook check on the 8th rank is mate.",
-  },
-  {
-    id: 'discovered',
-    title: 'Peekaboo',
-    theme: 'discovered check',
-    level: 1,
-    fen: '4k3/8/8/1q6/8/8/4B3/4R1K1 w - - 0 1',
-    line: ['e2b5'],
-    idea: 'The bishop is blocking the rook on the e-file. Moving it uncovers check on the king, so the bishop can grab the queen on b5 with check. Any other bishop move lets the queen block on the e-file.',
-  },
-  {
-    id: 'knight-fork',
-    title: 'Royal Fork',
-    theme: 'knight fork',
-    level: 2,
-    fen: '4k3/1q6/8/8/4N3/8/5PPP/6K1 w - - 0 1',
-    line: ['e4d6', 'e8d7', 'd6b7'],
-    idea: 'From d6 the knight checks the king on e8 and attacks the queen on b7 at the same time. The king has to move, and the queen falls.',
-  },
-  {
-    id: 'skewer',
-    title: 'Shish Kebab',
-    theme: 'skewer',
-    level: 2,
-    fen: '4q3/8/8/8/4k3/8/P6K/R7 w - - 0 1',
-    line: ['a1e1', 'e4d3', 'e1e8'],
-    idea: 'The king and queen are lined up on the e-file. A rook check on e1 forces the king to step aside, exposing the queen behind it.',
-  },
-  {
-    id: 'smothered',
-    title: 'Smothered',
-    theme: 'smothered mate',
-    level: 3,
-    fen: '6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1',
-    line: ['g5f7'],
-    idea: "Black's king on h8 is completely surrounded by its own rook and pawns. A single knight check from f7 is mate because nothing can block a knight and the king has no squares.",
-  },
-  {
-    id: 'deflection',
-    title: 'Look Away',
-    theme: 'deflection, back-rank mate',
-    level: 3,
-    fen: 'r5k1/5ppp/8/8/8/8/1Q3PPP/1R4K1 w - - 0 1',
-    line: ['b2b8', 'a8b8', 'b1b8'],
-    idea: "The rook on a8 is the only thing guarding Black's back rank. Sacrifice the queen on b8 to drag the rook away, then the white rook mates on b8.",
-  },
-];
+// Puzzle selection. The pool (server/puzzle-pool.json) is built from the
+// Lichess puzzle database by scripts/import-puzzles.js: a few thousand
+// positions, each filed under one teaching theme and one of three levels, and
+// each checked against our own engine. Every request picks a fresh one.
+const THEMES = require('./themes');
+const POOL = require('./puzzle-pool.json');
+
+const LEVELS = [1, 2, 3];
+const IDEAS = new Map(THEMES.map((t) => [t.name, t.idea]));
+const byThemeLevel = new Map(); // "fork|2" -> [puzzle]
+for (const p of POOL) {
+  const key = `${p.theme}|${p.level}`;
+  if (!byThemeLevel.has(key)) byThemeLevel.set(key, []);
+  byThemeLevel.get(key).push(p);
+}
+const themeNames = THEMES.map((t) => t.name).filter((name) => LEVELS.some((l) => byThemeLevel.has(`${name}|${l}`)));
+
+const clampLevel = (level) => Math.max(1, Math.min(3, Math.round(Number(level)) || 1));
+
+// The theme a spoken request means: "forks" -> fork, "back rank" -> back-rank mate.
+function matchTheme(text) {
+  const want = String(text || '').toLowerCase().trim();
+  if (!want) return null;
+  const words = (t) => t.split(/[^a-z]+/).map((w) => w.replace(/s$/, '')).filter((w) => w.length >= 3);
+  const asked = words(want);
+  let best = null;
+  let bestScore = 0;
+  for (const name of themeNames) {
+    // Whole words only, so "the skewer" can't match the "the" inside "smothered".
+    const own = words(name);
+    const score = name === want ? 100 : asked.filter((w) => own.includes(w)).length;
+    if (score > bestScore) {
+      best = name;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function toPublic(p) {
+  return { id: p.id, fen: p.fen, line: p.line, level: p.level, rating: p.rating, theme: p.theme, idea: IDEAS.get(p.theme) };
+}
+
+// which: "next" | "easier" | "harder" | "theme"
+// level: the student's current level; seen: ids to avoid; lastTheme: avoid repeating it on "next"
+// Returns { puzzle, note? } or { error }.
+function nextPuzzle({ which = 'next', level, theme, lastTheme, seen } = {}, random = Math.random) {
+  const current = clampLevel(level);
+  let target = current;
+  let note = '';
+  if (which === 'easier' || which === 'harder') {
+    target = clampLevel(current + (which === 'harder' ? 1 : -1));
+    if (target === current) note = `This is already the ${which === 'harder' ? 'hardest' : 'easiest'} level, so here is another puzzle at the same level.`;
+  }
+
+  let name;
+  if (which === 'theme') {
+    name = matchTheme(theme);
+    if (!name) return { error: `No puzzles with the theme "${String(theme || '').slice(0, 40)}". Available themes: ${themeNames.join(', ')}.` };
+  } else {
+    const options = themeNames.filter((n) => n !== lastTheme && byThemeLevel.has(`${n}|${target}`));
+    name = options[Math.floor(random() * options.length)];
+  }
+
+  // The asked-for level if this theme has it, otherwise the nearest one.
+  const levels = [...LEVELS].sort((a, b) => Math.abs(a - target) - Math.abs(b - target));
+  const bucket = byThemeLevel.get(`${name}|${levels.find((l) => byThemeLevel.has(`${name}|${l}`))}`);
+  const avoid = new Set(Array.isArray(seen) ? seen.slice(0, 1000).map(String) : []);
+  const fresh = bucket.filter((p) => !avoid.has(p.id));
+  const from = fresh.length ? fresh : bucket; // everything seen: start over rather than run dry
+  const puzzle = toPublic(from[Math.floor(random() * from.length)]);
+  return note ? { puzzle, note } : { puzzle };
+}
+
+module.exports = { nextPuzzle, matchTheme, themeNames, POOL, clampLevel };

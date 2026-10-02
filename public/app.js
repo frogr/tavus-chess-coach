@@ -5,7 +5,6 @@
 // chess.js and the Daily SDK are served by our own server from the installed
 // npm packages (see VENDOR in server/index.js), so nothing loads from a CDN.
 import { Chess } from '/vendor/chess.js';
-import { pickPuzzle } from '/puzzle-logic.mjs';
 import { Board } from '/board.js';
 import * as sounds from '/sounds.js';
 
@@ -50,7 +49,42 @@ function puzzleLog() {
   return (state.sessionLog.puzzles[p.id] ||= { theme: p.theme, wrong: [], hints: 0, solved: false, gaveUp: false });
 }
 
-const puzzle = () => state.puzzles[state.index];
+const puzzle = () => state.puzzle;
+
+// How the current puzzle is going. Kept for every puzzle (the session log
+// above only exists during a call) so the next one can be pitched right.
+function tally(update) {
+  for (const t of [puzzleLog(), state.current]) if (t) update(t);
+}
+
+// Puzzles already seen on this device are not served again.
+const SEEN_KEY = 'coach-rook-seen';
+function seenPuzzles() {
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; }
+}
+function markSeen(id) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seenPuzzles().filter((x) => x !== id), id].slice(-500))); } catch {}
+}
+function storedLevel() {
+  try { return Math.max(1, Math.min(3, Number(localStorage.getItem('coach-rook-level')) || 1)); } catch { return 1; }
+}
+
+// Difficulty follows the student: two clean solves in a row moves up a level,
+// giving up or two wrong tries moves down.
+function adaptLevel() {
+  const c = state.current;
+  if (!c) return;
+  if (c.gaveUp || c.wrong.length >= 2) {
+    state.level = Math.max(1, state.level - 1);
+    state.streak = 0;
+  } else if (c.solved && !c.wrong.length && !c.hints) {
+    state.streak = (state.streak || 0) + 1;
+    if (state.streak >= 2) {
+      state.level = Math.min(3, state.level + 1);
+      state.streak = 0;
+    }
+  } else state.streak = 0;
+}
 
 // Every time the board is pointed at a new position (puzzle, review ply, key
 // moment) the generation changes. Animations and delayed take-backs remember
@@ -191,12 +225,28 @@ function sideName(color) {
   return color === 'w' ? 'White' : 'Black';
 }
 
-async function loadPuzzle(index, { announce = true } = {}) {
-  state.index = (index + state.puzzles.length) % state.puzzles.length;
+// request.which: "next" (new pattern, difficulty follows the student), "easier",
+// "harder", "theme" (with request.theme), or "retry" (the same puzzle again).
+// Returns the context for the coach, or { error } when the request can't be met.
+async function loadPuzzle(request = { which: 'next' }, { announce = true } = {}) {
+  let note = '';
+  if (request.which !== 'retry' || !state.puzzle) {
+    if (request.which === 'next') adaptLevel();
+    const res = await api('/api/puzzle', { which: request.which, theme: request.theme, level: state.level, lastTheme: state.puzzle?.theme, seen: seenPuzzles() });
+    if (res.error) return { error: res.error };
+    note = res.note || '';
+    state.puzzle = res.puzzle;
+    state.level = res.puzzle.level;
+    state.count = (state.count || 0) + 1;
+    state.current = { wrong: [], hints: 0, solved: false, gaveUp: false };
+    markSeen(res.puzzle.id);
+    try { localStorage.setItem('coach-rook-level', String(state.level)); } catch {}
+  }
   setMode('puzzle');
   newPosition();
   const p = puzzle();
   state.chess = new Chess(p.fen);
+  state.orientation = state.chess.turn(); // the student's side at the bottom
   state.ply = 0;
   state.solved = false;
   state.selected = null;
@@ -205,12 +255,13 @@ async function loadPuzzle(index, { announce = true } = {}) {
   state.arrows = [];
   state.sanLog = [];
   state.badge = null;
-  audit('puzzle.load', { id: p.id, theme: p.theme, level: p.level, fen: p.fen });
-  $('pTitle').textContent = p.title;
-  $('pLevel').textContent = `Puzzle ${state.index + 1} of ${state.puzzles.length} · difficulty ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
-  setStatus(`${sideName(state.chess.turn())} to move and win`);
+  audit('puzzle.load', { id: p.id, theme: p.theme, level: p.level, rating: p.rating, fen: p.fen, which: request.which });
+  // The theme stays hidden until it's solved: naming it would give the answer away.
+  $('pTitle').textContent = `${sideName(state.chess.turn())} to move`;
+  $('pLevel').textContent = `Puzzle ${state.count} · difficulty ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
+  setStatus('Find the best move');
   render();
-  const context = await puzzleContext(p);
+  const context = (note ? note + ' ' : '') + (await puzzleContext(p));
   // When the student changes the puzzle themselves, let the coach react to it.
   if (announce && state.conversationId) sendRespond(context + ' The student loaded this themselves. Introduce it in one sentence.');
   return context;
@@ -223,7 +274,7 @@ async function puzzleContext(p) {
   // just gets the solution and idea without the piece list.
   const { text } = await api('/api/describe', { fen: p.fen }).catch(() => ({ text: '(piece list unavailable)' }));
   return (
-    `[board] New puzzle loaded: "${p.title}", puzzle ${state.index + 1} of ${state.puzzles.length}, difficulty ${p.level} of 3. ` +
+    `[board] New puzzle loaded: difficulty ${p.level} of 3 (rated ${p.rating}). ` +
     `Position: ${text} The student plays ${sideName(new Chess(p.fen).turn())}, and the goal is to find the winning move. ` +
     `FOR THE COACH ONLY, do not reveal unless the student gives up: the solution is ${solutionSan(p).join(' ')}. ` +
     `Theme: ${p.theme}. Idea: ${p.idea}`
@@ -247,7 +298,7 @@ async function playerMove(from, to, promotion = 'q') {
   if (!correct) {
     render();
     setStatus(`${move.san} isn't it. Try again.`, 'bad');
-    puzzleLog()?.wrong.push(move.san);
+    tally((t) => t.wrong.push(move.san));
     board.flash(to);
     setTimeout(() => sounds.play('mistake'), 220);
     // Take the move back on a fixed timer, independent of the engine call, so
@@ -280,10 +331,9 @@ async function playerMove(from, to, promotion = 'q') {
 
   if (state.chess.isCheckmate() || state.ply >= p.line.length) {
     state.solved = true;
-    const pl = puzzleLog();
-    if (pl) pl.solved = true;
-    setStatus('Solved', 'good');
-    audit('puzzle.solved', { id: p.id, wrong: pl?.wrong, hints: pl?.hints });
+    tally((t) => (t.solved = true));
+    setStatus(`Solved · ${p.theme}`, 'good');
+    audit('puzzle.solved', { id: p.id, theme: p.theme, wrong: state.current?.wrong, hints: state.current?.hints });
     setTimeout(() => sounds.play('great'), 260);
     sendRespond(
       `[board] ${who} played ${move.san} (${moveWords}). Correct, and that SOLVES the puzzle (theme: ${p.theme}). ` +
@@ -327,8 +377,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function playSolution() {
   const p = puzzle();
-  const pl = puzzleLog();
-  if (pl && !pl.solved) pl.gaveUp = true;
+  tally((t) => !t.solved && (t.gaveUp = true));
   const gen = newPosition();
   state.busy = true;
   state.selected = null;
@@ -361,7 +410,6 @@ function setMode(mode) {
   state.mode = mode;
   document.body.dataset.mode = mode;
   document.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === mode));
-  if (mode === 'puzzle') state.orientation = 'w';
 }
 
 function moveLabel(m) {
@@ -620,8 +668,7 @@ async function showPuzzleEngineLine() {
   const a = await api('/api/analyze', { fen: state.chess.fen() });
   const line = a.best ? a.best.san.slice(0, 4) : [];
   if (!line.length) return 'There is no engine line to show here: the position on the board is already finished.';
-  const pl = puzzleLog();
-  if (pl && !pl.solved) pl.gaveUp = true; // the engine's line from here is the answer
+  tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
   const before = { chess: state.chess, lastMove: state.lastMove };
   setStatus(`Engine line: ${line.join(' ')}`, '');
   const played = await animateLine(before.chess.fen(), line);
@@ -632,7 +679,7 @@ async function showPuzzleEngineLine() {
     state.lastMove = before.lastMove;
     state.busy = false;
     state.snap = true;
-    setStatus(state.solved ? 'Solved' : `${sideName(state.chess.turn())} to move`, state.solved ? 'good' : '');
+    setStatus(state.solved ? `Solved · ${puzzle().theme}` : 'Find the best move', state.solved ? 'good' : '');
     render();
   }, 4000);
   return `The board animated the engine's line from the current position: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
@@ -648,8 +695,7 @@ const TOOL_HANDLERS = {
   },
 
   async chess_show_on_board(args) {
-    const pl = puzzleLog();
-    if (pl && !pl.solved) pl.hints += 1;
+    if (state.mode === 'puzzle') tally((t) => !t.solved && (t.hints += 1));
     const squares = (args.squares || []).filter((s) => /^[a-h][1-8]$/.test(s));
     const arrows = (args.arrows || [])
       .map((a) => String(a).toLowerCase().match(/([a-h][1-8]).*?([a-h][1-8])/))
@@ -667,10 +713,10 @@ const TOOL_HANDLERS = {
   },
 
   async chess_load_puzzle(args) {
-    const pick = pickPuzzle(state.puzzles, state.index, args.which || 'next', args.theme);
-    if (pick.error) return pick.error;
-    const context = await loadPuzzle(pick.index, { announce: false });
-    return `${pick.note ? pick.note + ' ' : ''}${context} Introduce the puzzle in one sentence and ask the student what they notice.`;
+    const which = ['next', 'retry', 'easier', 'harder', 'theme'].includes(args.which) ? args.which : 'next';
+    const context = await loadPuzzle({ which, theme: args.theme }, { announce: false });
+    if (context.error) return context.error;
+    return `${context} Introduce the puzzle in one sentence and ask the student what they notice.`;
   },
 
   async chess_play_solution() {
@@ -1028,10 +1074,10 @@ async function boot() {
   $('hoodClose').addEventListener('click', () => setHood(false));
   if (SIM) setupSim();
 
-  state.puzzles = await api('/api/puzzles');
-  await loadPuzzle(0, { announce: false });
-  $('retry').addEventListener('click', () => loadPuzzle(state.index));
-  $('next').addEventListener('click', () => loadPuzzle(state.index + 1));
+  state.level = storedLevel();
+  await loadPuzzle({ which: 'next' }, { announce: false });
+  $('retry').addEventListener('click', () => loadPuzzle({ which: 'retry' }));
+  $('next').addEventListener('click', () => loadPuzzle({ which: 'next' }));
   $('lobby').addEventListener('submit', (e) => {
     e.preventDefault();
     startSession();
@@ -1048,7 +1094,7 @@ async function boot() {
   });
   document.querySelectorAll('[data-tab]').forEach((t) =>
     t.addEventListener('click', () => {
-      if (t.dataset.tab === 'puzzle') loadPuzzle(state.index);
+      if (t.dataset.tab === 'puzzle') loadPuzzle({ which: 'retry' });
       else {
         setMode('review');
         if (state.review) gotoPly(state.reviewPly);

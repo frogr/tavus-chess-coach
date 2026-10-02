@@ -9,7 +9,7 @@ const { Chess } = require('chess.js');
 const { analyze } = require('./engine');
 const { describePosition, summarizeAnalysis, scoreWords } = require('./chessText');
 const { tavus } = require('./tavus');
-const PUZZLES = require('./puzzles');
+const { nextPuzzle } = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
 const { cleanName, participantTag, getMemory, recordSession } = require('./memory');
 const { httpError } = require('./errors');
@@ -237,7 +237,8 @@ const routes = {
     return { tavusReady: Boolean(process.env.TAVUS_API_KEY && cfg.pal_id), needsCode: Boolean(ACCESS_CODE) };
   },
 
-  'GET /api/puzzles': async () => PUZZLES,
+  // A fresh puzzle: by level, optionally by theme, avoiding ones this student has seen.
+  'POST /api/puzzle': async (request) => nextPuzzle(request),
 
   'POST /api/describe': async ({ fen }) => ({ text: describePosition(cleanFen(fen)) }),
 
