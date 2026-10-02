@@ -817,8 +817,15 @@ const setStage = (name) => {
 
 function attach(el, track) {
   el.srcObject = new MediaStream([track]);
-  el.play?.().catch(() => {});
+  // If the browser refuses to start playback, the next click anywhere starts it.
+  el.play().catch(() => window.addEventListener('pointerdown', () => el.srcObject && el.play().catch(() => {}), { once: true }));
 }
+
+// Browsers hold back playback that starts in a background tab; resume when the tab is shown.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  for (const el of [$('coachVideo'), $('coachAudio'), $('selfVideo')]) if (el.srcObject && el.paused) el.play().catch(() => {});
+});
 
 function onTrackStarted(ev) {
   if (!ev.participant || !ev.track) return;
