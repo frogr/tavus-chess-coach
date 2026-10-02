@@ -88,6 +88,16 @@ A coach waits while you think, asks instead of telling, and points at the board.
 | `chess_take_back` | Undoes the student's last move and the coach's answer | `silent` / `generate_response` | The coach offers take-backs at low strengths |
 | `chess_review_game` | Loads the game just played into review | `static_filler` / `generate_response` | The engine pass takes a few seconds |
 
+## Coaches
+
+`server/coaches.js` lists four coaches. Each is its own PAL with a stock Tavus face and voice and a paragraph of personality; the tools and the engine rules are shared. Setup creates or updates one PAL per coach, finding each by name, and the lobby shows a picker once they exist. Session notes are pinned to every coach's memory store, so switching coach keeps the history. The first coach keeps the original PAL.
+
+A session runs for up to `MAX_CALL_SECONDS` (default and Tavus's ceiling: 3600). The time left is shown in the call bar.
+
+## Puzzle rating
+
+Each puzzle is scored like a rated game against the puzzle's Lichess rating (Elo, K = 40): a clean solve is a win, a solve with wrong tries or hints a draw, giving up a loss. The rating is kept in the browser, picks the level of the next puzzle, and is reported to the coach along with the streak.
+
 ## Playing the coach
 
 - **Strength.** `server/play.js` weakens Stockfish the way Lichess and chess.com levels do: a shallower search, then a weighted pick among the engine's top candidates, where the weight on worse moves grows as the rating drops. At 500 and 1000 there is also a small chance of a move played without looking. 3000 is the engine's best move. The ratings are labels for these settings, not measured Elo.
@@ -99,7 +109,7 @@ A coach waits while you think, asks instead of telling, and points at the board.
 
 - **The model never does chess.** It narrates, asks, encourages, and points. Correctness comes from the board (move validation) and Stockfish (evaluation). The system prompt says so explicitly, and the tools make the right path the easy one.
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)".
-- **Puzzles are drawn fresh from a pool of about 4,800.** They come from the Lichess puzzle database (CC0), filed under 20 teaching themes and three levels by rating. Each request picks a new pattern, skips puzzles this browser has already seen, and difficulty follows the student: two clean solves in a row moves up a level, giving up or two wrong tries moves down. The theme stays hidden until the puzzle is solved.
+- **Puzzles are drawn fresh from a pool of about 4,800.** They come from the Lichess puzzle database (CC0), filed under 20 teaching themes and three levels by rating. Each request picks a new pattern, skips puzzles this browser has already seen, and difficulty follows the student's puzzle rating. The theme stays hidden until the puzzle is solved.
 - **Every puzzle is checked against our own engine.** The coach verifies claims with Stockfish at the strength this server runs it, so a puzzle is only kept if that engine also picks the solution's first move (`scripts/import-puzzles.js`; 4,830 of 4,858 candidates passed). `npm run verify-puzzles` spot-checks a random sample in CI.
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while you calculate, and `idle_engagement: patient` gives a gentle nudge rather than an answer when you go quiet.
 - **Memory is written from the board, not inferred from the call.** Pinned session notes come from what actually happened on the board; Tavus learned memory adds the softer context. The memory store is keyed to the student's name plus a random **notebook key** generated in their browser, so someone else typing the same name gets an empty notebook, not theirs. The key is shown in the notebook panel so it can be carried to another device.
