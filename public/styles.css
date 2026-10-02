@@ -78,12 +78,9 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .stage[data-state="connecting"] > .connecting { display: grid; }
 .stage[data-state="live"] > .live { display: block; }
 
-.lobby { flex-direction: column; gap: 12px; padding: 26px 24px 22px; }
-.lobby-mark { font-size: 40px; line-height: 1; color: var(--accent); }
-.lobby h2 { font-size: 20px; }
-.lobby label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
-.lobby input { color: var(--text); }
-.lobby .primary { margin-top: 4px; padding: 11px 14px; }
+.lobby { flex-direction: column; gap: 10px; padding: 20px; }
+.lobby .primary { padding: 11px 14px; }
+.lobby .error:empty { display: none; }
 
 .connecting { position: absolute; inset: 0; place-content: center; justify-items: center; gap: 14px; color: var(--muted); }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }
@@ -95,7 +92,6 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .self-video.off { display: none; }
 .caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 16px 12px; font-size: 14.5px; line-height: 1.4; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); background: linear-gradient(transparent, rgba(0, 0, 0, .78)); }
 .caption:empty { display: none; }
-.caption .who { color: var(--accent); font-weight: 600; }
 .stage-note { position: absolute; left: 10px; top: 10px; max-width: 64%; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: rgba(0, 0, 0, .65); }
 .stage-note:empty { display: none; }
 
@@ -106,14 +102,13 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .notebook { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .notebook header { display: flex; align-items: baseline; gap: 8px; }
 .notebook h2 { font-size: 14px; }
+.notebook ul:empty { display: none; }
 .notebook ul { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
 .notebook li { font-size: 13px; line-height: 1.45; padding-left: 10px; border-left: 2px solid var(--accent); }
 .notebook li.learned { border-left-color: var(--line-strong); color: var(--muted); }
-.notebook li.empty { border-left-color: var(--line-strong); color: var(--muted); }
 .nb-key { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .nb-key summary { cursor: pointer; }
-.nb-key p { margin: 8px 0 6px; }
-.nb-key-row { display: flex; align-items: center; gap: 8px; }
+.nb-key-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .nb-key code { font-family: 'JetBrains Mono', monospace; color: var(--text); user-select: all; }
 .nb-key form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .nb-key input { flex: 1; min-width: 150px; padding: 5px 9px; font-size: 12.5px; }
@@ -207,10 +202,10 @@ body[data-mode="review"] .puzzle-only { display: none; }
 
 /* under the hood: a drawer, closed unless asked for */
 .hood { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100vw); z-index: 20; display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--surface); border-left: 1px solid var(--line-strong); box-shadow: -12px 0 40px rgba(0, 0, 0, .45); overflow: auto; }
-.hood header { display: flex; justify-content: space-between; align-items: center; }
+.hood header { display: flex; align-items: center; gap: 12px; }
+.hood header h2 { margin-right: auto; }
 .hood h2 { font-size: 15px; }
 .sim { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 10px; }
-.sim div { flex-basis: 100%; }
 .log { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 8px; }
 .log li { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; background: var(--raised); }
 .log .kind { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); display: block; margin-bottom: 2px; }
@@ -219,4 +214,3 @@ body[data-mode="review"] .puzzle-only { display: none; }
 .log li.err .kind { color: var(--bad); }
 .log pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
 
-.connecting button { margin-top: 6px; }

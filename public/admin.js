@@ -1,4 +1,4 @@
-// Audit dashboard. Everything shown here came from the audit log; all of it is
+// Admin dashboard. Everything shown here came from the audit log; all of it is
 // rendered as text (never as HTML), since the log holds what students and the
 // model said.
 const $ = (id) => document.getElementById(id);
@@ -23,7 +23,7 @@ async function get(path) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 || res.status === 404) {
     signOut();
-    throw new Error(res.status === 404 ? 'The admin dashboard is not enabled on this server (set ADMIN_TOKEN).' : 'Wrong admin token.');
+    throw new Error(res.status === 404 ? 'Admin is off: ADMIN_TOKEN is not set.' : 'Wrong token.');
   }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -36,11 +36,12 @@ function signOut() {
   view.hidden = true;
   $('nav').hidden = true;
   $('signOut').hidden = true;
+  $('storeInfo').textContent = '';
 }
 
 // ---------------------------------------------------------------- formatting
 const fmtTime = (ts) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const fmtClock = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtClock = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 function fmtLength(a, b) {
   if (!a || !b) return '';
   const s = Math.max(0, Math.round((new Date(b) - new Date(a)) / 1000));
@@ -69,76 +70,62 @@ function gist(e) {
 
 const isError = (e) => e.kind.includes('error') || Number(e.data?.status) >= 500;
 
-function eventRow(e) {
+function eventRow(e, time = fmtTime) {
   return h(
     'details',
     { class: `event${isError(e) ? ' err' : ''}` },
-    h('summary', {}, h('time', {}, fmtTime(e.ts)), h('span', { class: 'src' }, e.source), h('span', { class: 'kind' }, e.kind), h('span', { class: 'gist' }, gist(e))),
-    h('pre', {}, JSON.stringify({ id: e.id, client_id: e.client_id, conversation_id: e.conversation_id, ip: e.ip, data: e.data }, null, 2))
+    h('summary', {}, h('time', {}, time(e.ts)), h('span', { class: 'kind' }, e.kind), h('span', { class: 'gist' }, gist(e))),
+    h('pre', {}, JSON.stringify({ id: e.id, source: e.source, client_id: e.client_id, conversation_id: e.conversation_id, ip: e.ip, data: e.data }, null, 2))
   );
 }
 
 // ---------------------------------------------------------------- views
+const table = (heads, rows) =>
+  h('table', {}, h('thead', {}, h('tr', {}, ...heads.map(([t, cls]) => h('th', { class: cls || '' }, t)))), h('tbody', {}, rows));
+const row = (route, ...cells) =>
+  h('tr', { class: 'link', tabindex: '0', onclick: () => go(route), onkeydown: (e) => e.key === 'Enter' && go(route) }, ...cells);
+
 async function showOverview(which) {
   const { stats, sessions, visits } = await get('/api/admin/overview');
-  $('storeInfo').textContent = `${stats.events} events · stored in ${stats.store} · kept ${stats.retention_days} days`;
+  $('storeInfo').textContent = `${stats.events.toLocaleString()} events · ${stats.store} · ${stats.retention_days}-day retention`;
   if (which === 'visits') {
     view.replaceChildren(
-      h('h1', {}, 'Visits'),
-      h('p', { class: 'lede' }, 'Every page load, with or without a coach session: puzzles played, games reviewed, moves made.'),
       visits.length
-        ? h(
-            'table',
-            {},
-            h('thead', {}, h('tr', {}, ...['Last seen', 'First seen', 'Events', 'Moves', 'Coach session', 'Network'].map((t, i) => h('th', { class: i === 2 || i === 3 ? 'num' : '' }, t)))),
-            h(
-              'tbody',
-              {},
-              visits.map((v) =>
-                h(
-                  'tr',
-                  { class: 'link', onclick: () => go(`events?client=${v.client_id}`) },
-                  h('td', {}, fmtTime(v.last)),
-                  h('td', {}, fmtTime(v.first)),
-                  h('td', { class: 'num' }, String(v.events)),
-                  h('td', { class: 'num' }, String(v.moves)),
-                  h('td', { class: 'mono' }, v.conversation_id || ''),
-                  h('td', { class: 'mono' }, v.ip || '')
-                )
+        ? table(
+            [['Last seen'], ['First seen'], ['Events', 'num'], ['Moves', 'num'], ['Session'], ['IP']],
+            visits.map((v) =>
+              row(
+                `events?client=${v.client_id}`,
+                h('td', { class: 'when' }, fmtTime(v.last)),
+                h('td', { class: 'when dim' }, fmtTime(v.first)),
+                h('td', { class: 'num' }, String(v.events)),
+                h('td', { class: 'num' }, String(v.moves)),
+                h('td', { class: 'mono dim' }, v.conversation_id || ''),
+                h('td', { class: 'mono dim' }, v.ip || '')
               )
             )
           )
-        : h('p', { class: 'empty' }, 'No visits recorded yet.')
+        : h('p', { class: 'empty' }, 'No visits')
     );
     return;
   }
   view.replaceChildren(
-    h('h1', {}, 'Coach sessions'),
-    h('p', { class: 'lede' }, 'Each video conversation with the coach. Open one for its transcript, tool calls, board events and every API call behind it.'),
     sessions.length
-      ? h(
-          'table',
-          {},
-          h('thead', {}, h('tr', {}, ...['Started', 'Student', 'Length', 'Status', 'Events', 'Errors', 'Memory note'].map((t, i) => h('th', { class: i === 4 || i === 5 ? 'num' : '' }, t)))),
-          h(
-            'tbody',
-            {},
-            sessions.map((s) =>
-              h(
-                'tr',
-                { class: 'link', onclick: () => go(`session?id=${s.conversation_id}`) },
-                h('td', {}, fmtTime(s.started_at)),
-                h('td', {}, s.data.player || h('span', { class: 'muted' }, 'no name'), s.data.returning ? h('span', { class: 'pill' }, 'returning') : null),
-                h('td', {}, fmtLength(s.started_at, s.ended_at)),
-                h('td', {}, s.ended_at ? h('span', { class: 'pill' }, 'ended') : h('span', { class: 'pill live' }, 'open')),
-                h('td', { class: 'num' }, String(s.events)),
-                h('td', { class: 'num' }, s.errors ? h('span', { class: 'pill bad' }, String(s.errors)) : '0'),
-                h('td', {}, s.data.note_saved ? clip(s.data.note, 70) : h('span', { class: 'muted' }, s.ended_at ? 'none' : ''))
-              )
+      ? table(
+          [['Started'], ['Student'], ['Length'], ['Events', 'num'], ['Errors', 'num'], ['Note saved']],
+          sessions.map((s) =>
+            row(
+              `session?id=${s.conversation_id}`,
+              h('td', { class: 'when' }, fmtTime(s.started_at)),
+              h('td', {}, s.data.player || '—'),
+              h('td', { class: 'when' }, s.ended_at ? fmtLength(s.started_at, s.ended_at) : [h('span', { class: 'live-dot' }), 'live']),
+              h('td', { class: 'num' }, String(s.events)),
+              h('td', { class: s.errors ? 'num bad' : 'num dim' }, String(s.errors)),
+              h('td', { class: 'dim' }, s.data.note_saved ? clip(s.data.note, 90) : '')
             )
           )
         )
-      : h('p', { class: 'empty' }, 'No coach sessions recorded yet.')
+      : h('p', { class: 'empty' }, 'No sessions')
   );
 }
 
@@ -158,15 +145,31 @@ function transcriptLines(events) {
       if (p.role === 'user' && p.speech.startsWith('[board]')) continue;
       lines.push({ ts: e.ts, cls: p.role === 'user' ? 'student' : 'coach', who: p.role === 'user' ? 'Student' : 'Coach', text: p.speech });
     } else if (e.kind === 'tavus.received' && d.event_type === 'conversation.tool_call') {
-      lines.push({ ts: e.ts, cls: 'tool', who: 'Tool call', text: `${p.name}(${typeof p.arguments === 'string' ? p.arguments : JSON.stringify(p.arguments || {})})` });
+      lines.push({ ts: e.ts, cls: 'tool', who: 'Tool', text: `${p.name}(${typeof p.arguments === 'string' ? p.arguments : JSON.stringify(p.arguments || {})})` });
     } else if (e.kind === 'tavus.sent' && d.event_type === 'conversation.tool_result') {
-      lines.push({ ts: e.ts, cls: 'tool', who: 'Tool result', text: String(p.output ?? '') });
+      lines.push({ ts: e.ts, cls: 'tool', who: 'Result', text: String(p.output ?? ''), clamp: true });
     } else if (e.kind === 'tavus.sent' && (d.event_type === 'conversation.respond' || d.event_type === 'conversation.append_llm_context')) {
-      lines.push({ ts: e.ts, cls: 'board', who: d.event_type === 'conversation.respond' ? 'Board' : 'Board (context)', text: p.text || p.context || '' });
+      lines.push({ ts: e.ts, cls: 'board', who: 'Board', text: (p.text || p.context || '').replace(/^\[board\]\s*/, ''), clamp: true });
     }
   }
   return lines;
 }
+
+// "back-rank mate: solved, 1 wrong" per puzzle, then the reviewed game.
+function boardSummary(summary) {
+  if (!summary) return null;
+  const parts = (summary.puzzles || []).map((p) => {
+    const bits = [p.solved ? 'solved' : p.gaveUp ? 'gave up' : 'unsolved'];
+    if (p.wrong?.length) bits.push(`${p.wrong.length} wrong (${p.wrong.join(', ')})`);
+    if (p.hints) bits.push(`${p.hints} hint${p.hints > 1 ? 's' : ''}`);
+    return `${p.theme}: ${bits.join(', ')}`;
+  });
+  if (summary.review) parts.push(`Review of ${summary.review.game}: ${summary.review.tries?.length || 0} tries`);
+  return parts.join('\n');
+}
+
+// Long text shows three lines; a click opens it.
+const clamped = (tag, text) => h(tag, { class: 'clamp', onclick: (e) => e.currentTarget.classList.toggle('open') }, text);
 
 const GROUPS = [
   ['All', () => true],
@@ -175,7 +178,7 @@ const GROUPS = [
   ['Call', (e) => e.kind.startsWith('call.')],
   ['Tavus API', (e) => e.kind.startsWith('tavus.api')],
   ['Webhooks', (e) => e.kind.startsWith('tavus.webhook')],
-  ['Our API', (e) => e.kind.startsWith('http')],
+  ['HTTP', (e) => e.kind.startsWith('http')],
   ['Errors', isError],
 ];
 
@@ -184,66 +187,88 @@ async function showSession(id, refresh) {
   const d = s.data || {};
   const tavus = d.tavus || {};
   const lines = transcriptLines(s.events);
-  const list = h('div', { class: 'events' });
+  const list = h('div', { class: 'in-session' });
   const filters = h('div', { class: 'filters' });
   const paint = (name) => {
-    const test = GROUPS.find((g) => g[0] === name)[1];
-    list.replaceChildren(...s.events.filter(test).map(eventRow));
-    filters.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent.startsWith(name))));
+    list.replaceChildren(...s.events.filter(GROUPS.find((g) => g[0] === name)[1]).map((e) => eventRow(e, fmtClock)));
+    filters.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.group === name)));
   };
-  for (const [name, test] of GROUPS) filters.append(h('button', { class: 'quiet small', onclick: () => paint(name) }, `${name} ${s.events.filter(test).length}`));
+  for (const [name, test] of GROUPS) {
+    const n = s.events.filter(test).length;
+    if (n || name === 'All') filters.append(h('button', { class: 'quiet small', 'data-group': name, onclick: () => paint(name) }, name, h('span', { class: 'n' }, String(n))));
+  }
 
-  const fact = (label, value) => (value === undefined || value === null || value === '' ? [] : [h('dt', {}, label), h('dd', {}, typeof value === 'string' ? value : JSON.stringify(value))]);
+  const fact = (label, value) => {
+    if (value === undefined || value === null || value === '') return [];
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    return [h('dt', {}, label), text.length > 140 ? clamped('dd', text) : h('dd', {}, text)];
+  };
+  const json = (label, value, open) =>
+    value ? h('details', open ? { open: '' } : {}, h('summary', {}, label), h('pre', {}, typeof value === 'string' ? value : JSON.stringify(value, null, 2))) : null;
   const official = d.transcript || tavus.transcript || (tavus.events || []).find((e) => /transcription_ready/.test(e.event_type || ''))?.properties?.transcript;
   const perception = d.perception_analysis || (tavus.events || []).find((e) => /perception_analysis/.test(e.event_type || ''))?.properties;
 
   view.replaceChildren(
-    ...[
-    h('button', { class: 'quiet small back', onclick: () => go('sessions') }, '← All sessions'),
-    h('h1', {}, d.player ? `${d.player}'s session` : 'Session without a name'),
-    h('p', { class: 'lede' }, `${fmtTime(s.started_at)}${s.ended_at ? ` · ${fmtLength(s.started_at, s.ended_at)}` : ' · still open'} · ${s.events.length} events`),
-    refreshError ? h('p', { class: 'error' }, `Couldn't refresh from Tavus: ${refreshError}`) : null,
     h(
-      'dl',
-      { class: 'facts' },
-      ...fact('Conversation', s.conversation_id),
-      ...fact('PAL', d.pal_id),
-      ...fact('Memory tag', d.participant_tag),
-      ...fact('Returning student', d.returning === undefined ? null : d.returning ? 'yes' : 'no'),
-      ...fact('Greeting', d.greeting),
-      ...fact('Context sent to the coach', d.context),
-      ...fact('Notes sent from memory', d.notes_sent?.length ? d.notes_sent.join(' ') : null),
-      ...fact('Board summary at the end', d.summary),
-      ...fact('Note saved to memory', d.note_saved ? d.note : d.ended_at || s.ended_at ? 'none' : null),
-      ...fact('Tavus status', tavus.status),
-      ...fact('Shutdown', d.shutdown),
-      ...fact('Browser visit', d.client_id),
-      ...fact('Network', d.ip)
+      'div',
+      { class: 'crumb' },
+      h('a', { href: '#sessions' }, 'Sessions /'),
+      h('h1', {}, d.player || 'Unnamed'),
+      h('span', { class: 'meta' }, `${fmtTime(s.started_at)} · ${s.ended_at ? fmtLength(s.started_at, s.ended_at) : 'live'}`)
     ),
-    h('h2', {}, 'What was said and done'),
-    lines.length
-      ? h('div', { class: 'transcript' }, lines.map((l) => h('div', { class: `line from-${l.cls}` }, h('time', {}, fmtClock(l.ts)), h('span', { class: 'who' }, l.who), h('p', {}, l.text))))
-      : h('p', { class: 'muted' }, 'Nothing was reported from the browser for this session.'),
-    h('h2', {}, "Tavus's own record"),
-    h('p', { class: 'muted small' }, d.tavus_fetched_at ? `Fetched ${fmtTime(d.tavus_fetched_at)}. The transcript and perception analysis arrive a little after a call ends.` : 'Not fetched yet.'),
-    h('div', { class: 'filters' }, h('button', { class: 'quiet small', onclick: () => showSession(id, true).catch(fail) }, 'Fetch again from Tavus')),
-    official ? h('details', { open: '' }, h('summary', {}, 'Transcript from Tavus'), h('pre', { class: 'json' }, JSON.stringify(official, null, 2))) : null,
-    perception ? h('details', {}, h('summary', {}, 'Perception analysis'), h('pre', { class: 'json' }, typeof perception === 'string' ? perception : JSON.stringify(perception, null, 2))) : null,
-    d.tavus ? h('details', {}, h('summary', {}, 'Full conversation record'), h('pre', { class: 'json' }, JSON.stringify(d.tavus, null, 2))) : null,
-    h('h2', {}, 'Timeline'),
-    filters,
-    list,
-    ].filter(Boolean)
+    h(
+      'div',
+      { class: 'session' },
+      h(
+        'div',
+        {},
+        h(
+          'section',
+          {},
+          h('h2', {}, 'Transcript'),
+          lines.length
+            ? lines.map((l) => h('div', { class: `line from-${l.cls}` }, h('time', {}, fmtClock(l.ts)), h('span', { class: 'who' }, l.who), l.clamp ? clamped('p', l.text) : h('p', {}, l.text)))
+            : h('p', { class: 'empty' }, 'Empty')
+        ),
+        h('section', {}, h('h2', {}, 'Timeline'), filters, list)
+      ),
+      h(
+        'aside',
+        { class: 'side' },
+        h(
+          'dl',
+          { class: 'facts' },
+          ...fact('Conversation', s.conversation_id),
+          ...fact('PAL', d.pal_id),
+          ...fact('Memory tag', d.participant_tag),
+          ...fact('Returning', d.returning === undefined ? null : d.returning ? 'yes' : 'no'),
+          ...fact('Greeting', d.greeting),
+          ...fact('Context sent', d.context),
+          ...fact('Memory notes sent', d.notes_sent?.length ? d.notes_sent.join(' ') : null),
+          ...fact('Board summary', boardSummary(d.summary)),
+          ...fact('Note saved', d.note_saved ? d.note : null),
+          ...fact('Tavus status', tavus.status),
+          ...fact('Shutdown', d.shutdown),
+          ...fact('Client', d.client_id),
+          ...fact('IP', d.ip)
+        ),
+        h('button', { class: 'quiet small refresh', onclick: () => showSession(id, true).catch(fail) }, d.tavus_fetched_at ? `Refresh from Tavus · ${fmtTime(d.tavus_fetched_at)}` : 'Fetch from Tavus'),
+        refreshError ? h('p', { class: 'error' }, refreshError) : null,
+        json('Tavus transcript', official),
+        json('Perception analysis', perception),
+        json('Tavus record', d.tavus)
+      )
+    )
   );
   paint('All');
 }
 
 async function showEvents(params) {
   const state = { kind: params.get('kind') || '', q: params.get('q') || '', client: params.get('client') || '', before: 0 };
-  const list = h('div', { class: 'events' });
-  const more = h('button', { class: 'quiet small', onclick: () => load(false) }, 'Load older');
-  const kind = h('input', { placeholder: 'Kind starts with (http, tavus.api, puzzle…)', value: state.kind });
-  const q = h('input', { placeholder: 'Search inside events', value: state.q });
+  const list = h('div', {});
+  const more = h('button', { class: 'quiet small more', onclick: () => load(false).catch(fail) }, 'Older');
+  const kind = h('input', { placeholder: 'Kind prefix, e.g. tavus.api', value: state.kind, 'aria-label': 'Kind prefix' });
+  const q = h('input', { placeholder: 'Search', value: state.q, 'aria-label': 'Search' });
   async function load(reset) {
     if (reset) state.before = 0;
     const query = new URLSearchParams({ limit: '200' });
@@ -251,10 +276,11 @@ async function showEvents(params) {
     if (state.before) query.set('before', String(state.before));
     const { events } = await get(`/api/admin/events?${query}`);
     if (reset) list.replaceChildren();
-    list.append(...events.map(eventRow));
+    // Reads of this dashboard are recorded too; they only show when asked for by kind.
+    list.append(...events.filter((e) => state.kind || e.kind !== 'http.admin').map((e) => eventRow(e)));
     if (events.length) state.before = events[events.length - 1].id;
     more.hidden = events.length < 200;
-    if (reset && !events.length) list.append(h('p', { class: 'empty' }, 'No events match.'));
+    if (reset && !events.length) list.append(h('p', { class: 'empty' }, 'No events'));
   }
   const form = h(
     'form',
@@ -272,8 +298,7 @@ async function showEvents(params) {
     h('button', { class: 'quiet small' }, 'Filter')
   );
   view.replaceChildren(
-    h('h1', {}, state.client ? 'One visit' : 'All events'),
-    h('p', { class: 'lede' }, state.client ? `Everything from browser visit ${state.client}, newest first.` : 'Every recorded event, newest first: API requests, calls to Tavus, webhooks, board and call events.'),
+    ...(state.client ? [h('div', { class: 'crumb' }, h('a', { href: '#visits' }, 'Visits /'), h('h1', { class: 'mono' }, state.client))] : []),
     form,
     list,
     more
@@ -319,6 +344,5 @@ $('login').addEventListener('submit', (e) => {
   route();
 });
 $('signOut').addEventListener('click', signOut);
-document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
 window.addEventListener('hashchange', route);
 route();

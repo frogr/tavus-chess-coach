@@ -10,6 +10,7 @@ import * as sounds from '/sounds.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM = new URLSearchParams(location.search).has('sim');
+const DEBUG = SIM || new URLSearchParams(location.search).has('debug'); // shows the live log drawer
 // ?nomedia joins a call without asking for the microphone or camera (watch-only; used for testing).
 const NO_MEDIA = new URLSearchParams(location.search).has('nomedia');
 const JOIN_TIMEOUT_MS = 45000;
@@ -258,8 +259,8 @@ async function loadPuzzle(request = { which: 'next' }, { announce = true } = {})
   audit('puzzle.load', { id: p.id, theme: p.theme, level: p.level, rating: p.rating, fen: p.fen, which: request.which });
   // The theme stays hidden until it's solved: naming it would give the answer away.
   $('pTitle').textContent = `${sideName(state.chess.turn())} to move`;
-  $('pLevel').textContent = `Puzzle ${state.count} · difficulty ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
-  setStatus('Find the best move');
+  $('pLevel').textContent = `Puzzle ${state.count} · ${'●'.repeat(p.level)}${'○'.repeat(3 - p.level)}`;
+  setStatus('');
   render();
   const context = (note ? note + ' ' : '') + (await puzzleContext(p));
   // When the student changes the puzzle themselves, let the coach react to it.
@@ -297,7 +298,7 @@ async function playerMove(from, to, promotion = 'q') {
 
   if (!correct) {
     render();
-    setStatus(`${move.san} isn't it. Try again.`, 'bad');
+    setStatus(`${move.san} ✗`, 'bad');
     tally((t) => t.wrong.push(move.san));
     board.flash(to);
     setTimeout(() => sounds.play('mistake'), 220);
@@ -343,7 +344,7 @@ async function playerMove(from, to, promotion = 'q') {
   }
 
   // Correct but not finished: play the opponent's reply from the solution line.
-  setStatus('Good move…', 'good');
+  setStatus(`${move.san} ✓`, 'good');
   state.busy = true;
   board.refresh();
   const gen = generation;
@@ -356,7 +357,6 @@ async function playerMove(from, to, promotion = 'q') {
   state.lastMove = reply;
   state.busy = false;
   moveSound(reply.san);
-  setStatus(`${sideName(state.chess.turn())} to move: finish it`, '');
   render();
   sendRespond(
     `[board] ${who} played ${move.san} (${moveWords}). Correct! The opponent replied ${reply.san} (${describeMoveWords(reply, state.chess)}). ` +
@@ -400,7 +400,7 @@ async function playSolution() {
   state.busy = false;
   board.refresh();
   audit('puzzle.solution_shown', { id: p.id });
-  setStatus('Solution shown', '');
+  setStatus('');
   return `The board is now animating the full solution: ${state.sanLog.join(' ')}. Idea: ${p.idea} Walk the student through why it works in one or two sentences, then offer the next puzzle.`;
 }
 
@@ -428,16 +428,16 @@ async function loadReview(pgn, side) {
   setMode('review');
   $('reviewGo').disabled = true;
   $('reviewGo').textContent = 'Analyzing…';
-  $('pTitle').textContent = 'Analyzing your game…';
-  $('pLevel').textContent = 'Game review';
-  setStatus('Stockfish is checking every move (up to ~30s on the free server)', '');
+  $('pTitle').textContent = 'Analyzing…';
+  $('pLevel').textContent = 'Review';
+  setStatus('');
   try {
     const review = await api('/api/review', { pgn, side, player: state.player || $('player').value.trim() });
     state.review = review;
     state.orientation = side === 'b' ? 'b' : 'w';
     const h = review.headers;
     $('pTitle').textContent = `${h.White} vs ${h.Black}`;
-    $('pLevel').textContent = `Game review · ${h.Result}${h.Event ? ' · ' + h.Event : ''}`;
+    $('pLevel').textContent = `${h.Result}${h.Event ? ' · ' + h.Event : ''}`;
     renderReviewPanel();
     gotoPly(0);
     log('review', 'in', `Analyzed ${review.moves.length} half-moves, ${review.keyMoments.length} key moments`);
@@ -460,7 +460,7 @@ async function loadReview(pgn, side) {
     log('error', 'err', e.message);
   } finally {
     $('reviewGo').disabled = false;
-    $('reviewGo').textContent = 'Analyze game';
+    $('reviewGo').textContent = 'Analyze';
   }
 }
 
@@ -479,7 +479,7 @@ function renderReviewPanel() {
   });
   const chips = $('moments');
   chips.innerHTML = '';
-  if (!r.keyMoments.length) chips.innerHTML = '<span class="muted small">No real mistakes found for your side. Nice game.</span>';
+  if (!r.keyMoments.length) chips.innerHTML = '<span class="muted small">No mistakes</span>';
   r.keyMoments.forEach((k) => {
     const m = r.moves[k.ply - 1];
     const b = document.createElement('button');
@@ -524,7 +524,7 @@ function gotoPly(ply) {
       state.arrows = [[m.best.slice(0, 2), m.best.slice(2, 4)]];
     }
   } else {
-    setStatus('Start of game', '');
+    setStatus('');
   }
   document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === ply));
   document.querySelector('.mv.cur')?.scrollIntoView({ block: 'nearest' });
@@ -550,7 +550,7 @@ function gotoMoment(n) {
   audit('review.moment', { moment: k.index, ply: k.ply, played: m.san });
   state.chess = new Chess(m.fenBefore);
   state.lastMove = prev ? { from: prev.uci.slice(0, 2), to: prev.uci.slice(2, 4) } : null;
-  setStatus(`Moment ${k.index}: you played ${m.san}. Find something better.`, '');
+  setStatus(`You played ${m.san}`, '');
   document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === k.ply - 1));
   render();
   return (
@@ -569,7 +569,7 @@ async function reviewTry(from, to, promotion = 'q') {
   const gen = generation;
   moveSound(move.san);
   render();
-  setStatus('Checking with the engine…', '');
+  setStatus('');
   const who = state.player || 'The student';
   const takeBack = () => {
     if (gen !== generation) return;
@@ -595,7 +595,7 @@ async function reviewTry(from, to, promotion = 'q') {
   if (j.ok) {
     state.trying = false;
     state.busy = false;
-    setStatus(`${j.san} works`, 'good');
+    setStatus(`${j.san} ✓`, 'good');
     render();
     sendRespond(
       `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). The engine approves: evaluation after it is ${j.evalAfter}` +
@@ -603,7 +603,7 @@ async function reviewTry(from, to, promotion = 'q') {
         `Praise what they found, explain the idea in a sentence, and offer the next key moment.`
     );
   } else {
-    setStatus(`${j.san} isn't better. Try again.`, 'bad');
+    setStatus(`${j.san} ✗`, 'bad');
     setTimeout(takeBack, 900); // the board stays locked until the move is taken back
     sendRespond(
       `[board] At key moment ${state.moment}, ${who} tried ${j.san} (${j.words}). Not good enough: evaluation after it is ${j.evalAfter}, ` +
@@ -650,7 +650,7 @@ async function showEngineLine() {
   if (!m || !m.bestLine.length) return 'There is no engine line to show here.';
   const line = m.bestLine.slice(0, 5);
   const ply = state.reviewPly;
-  setStatus(`Engine line: ${line.join(' ')}`, '');
+  setStatus(line.join(' '), '');
   const played = await animateLine(m.fenBefore, line);
   // Leave the line on the board for a beat, then return to where we were.
   const gen = generation;
@@ -670,7 +670,7 @@ async function showPuzzleEngineLine() {
   if (!line.length) return 'There is no engine line to show here: the position on the board is already finished.';
   tally((t) => !t.solved && (t.gaveUp = true)); // the engine's line from here is the answer
   const before = { chess: state.chess, lastMove: state.lastMove };
-  setStatus(`Engine line: ${line.join(' ')}`, '');
+  setStatus(line.join(' '), '');
   const played = await animateLine(before.chess.fen(), line);
   const gen = generation;
   setTimeout(() => {
@@ -679,7 +679,7 @@ async function showPuzzleEngineLine() {
     state.lastMove = before.lastMove;
     state.busy = false;
     state.snap = true;
-    setStatus(state.solved ? `Solved · ${puzzle().theme}` : 'Find the best move', state.solved ? 'good' : '');
+    setStatus(state.solved ? `Solved · ${puzzle().theme}` : '', state.solved ? 'good' : '');
     render();
   }, 4000);
   return `The board animated the engine's line from the current position: ${played.join(' ')}. It returns to the position in a few seconds. Explain the key idea of the line in one or two sentences.`;
@@ -794,13 +794,10 @@ function onAppMessage(ev) {
       handleToolCall(p);
       break;
     case 'conversation.utterance': {
-      const role = p.role === 'user' ? 'You' : 'Coach Rook';
       // Board messages come back as "user" speech; they are not something the student said.
       if (p.speech && !(p.role === 'user' && p.speech.startsWith('[board]'))) {
-        const who = document.createElement('span');
-        who.className = 'who';
-        who.textContent = `${role}: `;
-        $('caption').replaceChildren(who, document.createTextNode(p.speech));
+        // Captions are the coach's words only.
+        if (p.role !== 'user') $('caption').textContent = p.speech;
         log(`utterance (${p.role === 'user' ? 'student' : 'coach'})`, 'say', p.speech);
       }
       break;
@@ -864,7 +861,7 @@ async function startSession() {
   const attempt = (state.attempt = (state.attempt || 0) + 1); // lets Cancel abandon this start
   const cancelled = () => state.attempt !== attempt;
   try {
-    if (!window.Daily) throw new Error('The video library did not load. Reload the page and try again.');
+    if (!window.Daily) throw new Error('Video failed to load. Reload the page.');
     const { conversation_id, conversation_url, returning } = await api('/api/session', { player: state.player, key: notebookKey(), code: $('code').value.trim() });
     created = conversation_id;
     if (cancelled()) throw new Error('Cancelled.');
@@ -879,7 +876,7 @@ async function startSession() {
     call.on('error', (ev) => log('video error', 'err', ev?.errorMsg || 'Video call error'));
     call.on('camera-error', (ev) => {
       audit('call.camera_error', { message: ev?.errorMsg?.errorMsg || ev?.error?.msg || String(ev?.errorMsg || '') });
-      $('stageNote').textContent = "Coach Rook can't hear you: allow the microphone for this site, then start again.";
+      $('stageNote').textContent = 'Microphone blocked';
     });
     call.on('participant-updated', (ev) => ev.participant?.local && syncCallButtons());
     call.on('network-quality-change', (ev) => audit('call.network', { threshold: ev?.threshold, quality: ev?.quality }));
@@ -900,7 +897,7 @@ async function startSession() {
     // Joining waits on the browser's microphone prompt; don't wait forever.
     let timer;
     const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('The call did not connect. Allow the microphone and camera for this site, then try again.')), JOIN_TIMEOUT_MS);
+      timer = setTimeout(() => reject(new Error('Could not connect. Allow the microphone and camera, then try again.')), JOIN_TIMEOUT_MS);
     });
     const options = { url: conversation_url, userName: state.player || 'Student', ...(NO_MEDIA ? { startVideoOff: true, startAudioOff: true } : {}) };
     await Promise.race([call.join(options), timeout]).finally(() => clearTimeout(timer));
@@ -909,7 +906,7 @@ async function startSession() {
     setStage('live');
     syncCallButtons();
   } catch (e) {
-    const msg = e?.message || e?.errorMsg || 'The video call could not connect.';
+    const msg = e?.message || e?.errorMsg || 'Could not connect.';
     log('error', 'err', msg);
     if (state.call) {
       try { state.call.destroy(); } catch {}
@@ -976,7 +973,7 @@ async function loadNotebook() {
   const name = $('player').value.trim();
   const code = $('code').value.trim();
   const box = $('notebook');
-  if (!name || !state.tavusReady || (!$('codeField').hidden && !code)) {
+  if (!name || !state.tavusReady || (!$('code').hidden && !code)) {
     box.hidden = true;
     return;
   }
@@ -989,10 +986,6 @@ async function loadNotebook() {
     list.innerHTML = '';
     const notes = mem.pinned || [];
     const learned = mem.learned && learnedLines(mem.learned);
-    if (!notes.length && !learned?.length) {
-      list.innerHTML = '<li class="empty">Nothing yet. After each session Coach Rook notes what you nailed and what tripped you up.</li>';
-      return;
-    }
     for (const n of notes.slice(-3).reverse()) {
       const li = document.createElement('li');
       li.textContent = n.text;
@@ -1015,12 +1008,12 @@ function learnedLines(learned) {
   const walk = (obj, prefix) => {
     for (const [k, v] of Object.entries(obj || {})) {
       if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, prefix ? `${prefix} › ${k}` : k);
-      else out.push(`Learned: ${prefix ? prefix + ' › ' : ''}${k.replace(/_/g, ' ')}: ${Array.isArray(v) ? v.join(', ') : v}`);
+      else out.push(`${prefix ? prefix + ' › ' : ''}${k.replace(/_/g, ' ')}: ${Array.isArray(v) ? v.join(', ') : v}`);
     }
   };
   walk(learned.profile, '');
   const recent = learned.timeline?.recent_conversations;
-  if (Array.isArray(recent)) recent.slice(-2).forEach((c) => c?.summary && out.push(`Last call: ${c.summary}`));
+  if (Array.isArray(recent)) recent.slice(-2).forEach((c) => c?.summary && out.push(c.summary));
   return out;
 }
 
@@ -1048,7 +1041,6 @@ function setupSim() {
 function setHood(open) {
   $('hood').hidden = !open;
   $('hoodBtn').setAttribute('aria-expanded', String(open));
-  try { localStorage.setItem('coach-rook-hood', open ? 'open' : 'closed'); } catch {}
 }
 
 function syncSoundButton() {
@@ -1067,9 +1059,8 @@ async function boot() {
     syncSoundButton();
     sounds.play('click');
   });
-  let hoodOpen = SIM;
-  try { hoodOpen ||= localStorage.getItem('coach-rook-hood') === 'open'; } catch {}
-  setHood(hoodOpen);
+  setHood(SIM);
+  $('hoodBtn').hidden = !DEBUG;
   $('hoodBtn').addEventListener('click', () => setHood($('hood').hidden));
   $('hoodClose').addEventListener('click', () => setHood(false));
   if (SIM) setupSim();
@@ -1099,9 +1090,9 @@ async function boot() {
         setMode('review');
         if (state.review) gotoPly(state.reviewPly);
         else {
-          $('pTitle').textContent = 'Review one of your games';
-          $('pLevel').textContent = 'Game review';
-          setStatus('Paste a PGN or a Lichess link below', '');
+          $('pTitle').textContent = 'Review a game';
+          $('pLevel').textContent = '\u00a0';
+          setStatus('');
         }
       }
     })
@@ -1130,7 +1121,7 @@ async function boot() {
 
   const cfg = await api('/api/config');
   state.tavusReady = cfg.tavusReady;
-  $('codeField').hidden = !cfg.needsCode;
+  $('code').hidden = !cfg.needsCode;
   try { $('code').value = localStorage.getItem('coach-rook-code') || ''; } catch {}
   const refresh = () => {
     try { localStorage.setItem('coach-rook-code', $('code').value.trim()); } catch {}
@@ -1141,14 +1132,14 @@ async function boot() {
       await navigator.clipboard.writeText(formatKey(notebookKey()));
       $('nbKeyCopy').textContent = 'Copied';
     } catch {
-      $('nbKeyCopy').textContent = 'Select and copy it';
+      $('nbKeyCopy').textContent = 'Copy failed';
     }
     setTimeout(() => ($('nbKeyCopy').textContent = 'Copy'), 1500);
   });
   $('nbKeyForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    if (state.conversationId) return ($('nbKeyError').textContent = 'End the current session first.');
-    if (!useNotebookKey($('nbKeyInput').value)) return ($('nbKeyError').textContent = "That doesn't look like a notebook key.");
+    if (state.conversationId) return ($('nbKeyError').textContent = 'End the session first.');
+    if (!useNotebookKey($('nbKeyInput').value)) return ($('nbKeyError').textContent = 'Not a valid key.');
     $('nbKeyInput').value = '';
     $('nbKeyError').textContent = '';
     loadNotebook();
@@ -1158,11 +1149,11 @@ async function boot() {
   loadNotebook();
   if (!cfg.tavusReady) {
     $('start').disabled = true;
-    $('setupHint').textContent = 'The video coach is not set up on this server. The board and engine still work.';
+    $('lobbyError').textContent = 'Video coach unavailable.';
   }
 }
 
 boot().catch((e) => {
-  $('pTitle').textContent = "Couldn't load Coach Rook";
-  setStatus(`${e.message}. Reload the page to try again.`, 'bad');
+  $('pTitle').textContent = 'Failed to load';
+  setStatus(e.message, 'bad');
 });

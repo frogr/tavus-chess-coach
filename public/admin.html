@@ -4,31 +4,35 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
-  <title>Coach Rook · audit log</title>
+  <title>Coach Rook · Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/admin.css" />
 </head>
 <body class="admin">
   <header class="topbar">
-    <div class="brand"><span class="logo">♜</span> Coach Rook <span class="muted">audit log</span></div>
-    <nav id="nav" class="tabs" hidden>
-      <button data-view="sessions" class="active">Coach sessions</button>
-      <button data-view="visits">Visits</button>
-      <button data-view="events">All events</button>
+    <a class="brand" href="/" title="Back to the app"><span class="logo">♜</span> Coach Rook</a>
+    <nav id="nav" class="admin-nav" hidden>
+      <a href="#sessions" data-view="sessions">Sessions</a>
+      <a href="#visits" data-view="visits">Visits</a>
+      <a href="#events" data-view="events">Events</a>
     </nav>
-    <div class="topbar-actions"><span id="storeInfo" class="muted small"></span><button id="signOut" class="quiet" hidden>Sign out</button></div>
+    <div class="topbar-actions">
+      <a class="quiet-link" href="/">Back to app</a>
+      <button id="signOut" class="quiet" hidden>Sign out</button>
+    </div>
   </header>
 
-  <main id="main" class="admin-main">
+  <main class="admin-main">
     <form id="login" class="login">
-      <h1>Audit log</h1>
-      <p class="muted">Every API request, every call to Tavus, and everything that happened on the board and in the call.</p>
-      <label>Admin token <input id="token" type="password" autocomplete="current-password" /></label>
-      <button class="primary">Open</button>
+      <input id="token" type="password" autocomplete="current-password" placeholder="Admin token" aria-label="Admin token" autofocus />
+      <button class="primary">Sign in</button>
       <p id="loginError" class="error" role="alert"></p>
     </form>
     <section id="view" hidden></section>
+    <footer id="storeInfo" class="admin-foot"></footer>
   </main>
 
   <script type="module" src="/admin.js"></script>

@@ -1,4 +1,4 @@
-# Coach Rook: a chess coach with a face
+# Coach Rook
 
 A live video chess tutor built on Tavus CVI, with two modes:
 
@@ -21,11 +21,11 @@ Render reads `render.yaml`, asks for `TAVUS_API_KEY` and an `ACCESS_CODE`, and b
 
 Deploys are gated on tests: `render.yaml` sets `autoDeployTrigger: checksPass`, so once the repo is connected to Render through the GitHub integration, a push to `main` goes live only after the CI workflow passes. Until it is connected, deploy by hand with `render deploys create <service-id>`.
 
-Open `http://localhost:3000/?sim=1` to try the board and every tool handler with a simulator, without spending conversation minutes. `?nomedia` joins a call without asking for the microphone or camera (watch-only, handy for checking the video panel).
+URL flags: `?debug` adds a live log drawer of tool calls and board events; `?sim=1` adds buttons to that drawer that fire fake tool calls through the real handlers, without spending conversation minutes; `?nomedia` joins a call without the microphone or camera.
 
 ## Audit log and admin dashboard
 
-When the coach says something wrong, you need to see exactly what it was told. Everything is recorded:
+To debug what the coach said, you need what it was told. Everything is recorded:
 
 - **Every API request** to this server: method, path, status, timing, request and response.
 - **Every call to Tavus**, with the request and response, and **every Tavus callback** (transcript, perception analysis, shutdown reason). After a call ends the server also pulls Tavus's own verbose record of the conversation.
@@ -33,22 +33,20 @@ When the coach says something wrong, you need to see exactly what it was told. E
 
 Events are tied together by conversation ID and by a per-page-load visit ID, so a session reads as one timeline. Secrets (the access code, notebook keys, tokens) are redacted before anything is written.
 
-Set `DATABASE_URL` (Postgres; a free Neon database is plenty) so the log survives restarts, and `ADMIN_TOKEN` to turn on the dashboard at `/admin`: coach sessions with transcript and timeline, visits without a session, and a searchable stream of all events. Events are kept for `AUDIT_RETENTION_DAYS` (default 90). Without `DATABASE_URL` events are held in memory only. Video recordings are not captured: Tavus only records to an S3 bucket you provide.
+Set `DATABASE_URL` (Postgres; a free Neon database is plenty) so the log survives restarts, and `ADMIN_TOKEN` to turn on the dashboard at `/admin`: sessions (transcript, tool calls, what the coach was sent, Tavus's own record, full timeline), visits, and a searchable stream of all events. Events are kept for `AUDIT_RETENTION_DAYS` (default 90). Without `DATABASE_URL` events are held in memory only. Video recordings are not captured: Tavus only records to an S3 bucket you provide.
 
-## Memory: the coach remembers you
+## Memory
 
-Coaching only works if the coach remembers you. Coach Rook uses Tavus Memory Stores in two layers:
+Coach Rook uses Tavus Memory Stores in two layers:
 
 - **Session notes (pinned memory).** When a session ends, the board writes one factual note to your memory store: what you solved first try, what took wrong tries or hints (and which moves you tried), what you gave up on, and the mistakes from any game you reviewed. These are ground truth from the board, not the model's impression of the call, and pinned memories reach the PAL from the very next conversation with no processing delay.
 - **Learned memory.** Tavus maintains it automatically from each conversation (goals you mention, how you like to be coached).
 
-Next session, the latest notes go into the conversation context and the greeting is generated from them, so Coach Rook opens with "Welcome back, Austin. Last time the knight fork took you two tries, want to start there?" and can load a puzzle on that exact theme. The **Coach's notebook** panel shows what's in your memory store, so memory is something you can see, not just hear.
+Next session, the latest notes go into the conversation context and the greeting is generated from them, so Coach Rook opens with "Welcome back, Austin. Last time the knight fork took you two tries, want to start there?" and can load a puzzle on that exact theme. The **Notebook** panel shows what's in your memory store.
 
-## Why this project
+## Why chess
 
-Coaching is where face-to-face AI is strongest. A good chess coach isn't a database of answers. They watch you think, wait while you stare at the board, ask a question instead of giving the move away, and point: "look at *this* knight." Text chat can't do the waiting or the pointing. A video PAL can, as long as it's wired into the thing you're both looking at.
-
-It's also a demanding integration test, which made it a useful one to build. Chess punishes an LLM that improvises: a coach that confidently calls a blunder "brilliant" loses the student's trust immediately. So the interesting work is the same work a customer engineer does for every PAL: deciding **what the model is trusted with and what it isn't**, and building the plumbing that keeps it honest.
+A coach waits while you think, asks instead of telling, and points at the board. Video does those; text chat doesn't. Chess also punishes an LLM that improvises, so most of the work here is deciding what the model is trusted with (talking) and what it isn't (chess), and building the plumbing that enforces it.
 
 ## Architecture
 
@@ -62,7 +60,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 │        │                                │          │  memory per student   │
 │  Tool handlers ◄─── conversation.tool_call ────────┤                      │
 │        │        ───► conversation.tool_result ────►│                      │
-│  Daily iframe (video)                   │          └──────────────────────┘
+│  Daily call object (video)              │          └──────────────────────┘
 └────────┬───────────────────────────────┘
          │ /api/analyze, /api/session
 ┌────────▼───────────────────────────────┐
@@ -86,10 +84,10 @@ It's also a demanding integration test, which made it a useful one to build. Che
 | `chess_goto_moment` | Review: jumps to key moment N, the position just before the student's mistake, and lets them try again | `silent` / `generate_response` | The PAL drives the review's pacing; the board does the bookkeeping |
 | `chess_show_engine_line` | Animates the engine's better line, then returns to the position | `static_filler` / `generate_response` | "Watch this" while the pieces move, then the PAL explains the idea |
 
-## Decisions worth calling out
+## Design decisions
 
 - **The model never does chess.** It narrates, asks, encourages, and points. Correctness comes from the board (move validation) and Stockfish (evaluation). The system prompt says so explicitly, and the tools make the right path the easy one.
-- **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)". This was the single biggest reliability lever.
+- **No FEN or UCI reaches the LLM.** LLMs misread FEN constantly. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)".
 - **Puzzles are drawn fresh from a pool of about 4,800.** They come from the Lichess puzzle database (CC0), filed under 20 teaching themes and three levels by rating. Each request picks a new pattern, skips puzzles this browser has already seen, and difficulty follows the student: two clean solves in a row moves up a level, giving up or two wrong tries moves down. The theme stays hidden until the puzzle is solved.
 - **Every puzzle is checked against our own engine.** The coach verifies claims with Stockfish at the strength this server runs it, so a puzzle is only kept if that engine also picks the solution's first move (`scripts/import-puzzles.js`; 4,830 of 4,858 candidates passed). `npm run verify-puzzles` spot-checks a random sample in CI.
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while you calculate, and `idle_engagement: patient` gives a gentle nudge rather than an answer when you go quiet.
@@ -101,7 +99,7 @@ It's also a demanding integration test, which made it a useful one to build. Che
 - **Public endpoints are bounded.** The board and engine are open to anyone with the URL, so every engine route is rate limited per client, the engine queue and game length are capped, and wrong access codes lock that client out after ten tries. Inputs are validated (a bad FEN or PGN is a 400, never a crash), and what the browser reports at session end is filtered down to known themes and real chess moves before it is written into a student's memory.
 - **Dependencies are pinned and self-hosted.** chess.js and the Daily SDK are served from the installed npm packages and the piece images live in the repo. The one exception is Daily's call engine, which its SDK fetches from Daily's CDN and evaluates; the Content-Security-Policy allows exactly that (`'unsafe-eval'` plus `c.daily.co`) and nothing else from outside.
 - **A custom call UI, not Daily's prebuilt one.** The call runs on a Daily call object and the page renders the coach's video itself, so the panel shows the coach, captions and three controls instead of a meeting app's chrome.
-- **"Under the hood" drawer.** Every tool call, tool result, and board event, live, behind a button in the top bar. The audit log (above) is the durable version of the same thing.
+- **The page stays quiet.** No instructions or commentary on screen: a board, the coach, and short status marks. Talking is the coach's job.
 
 ## How game review works
 
@@ -141,7 +139,7 @@ server/audit.js        audit log: Postgres or in-memory store, redaction, batchi
 public/app.js          puzzle and review flow, tool handlers, interaction protocol, the call
 public/board.js        board renderer: sliding pieces, drag and click moves, arrows, badges
 public/sounds.js       synthesized move sounds (WebAudio, no audio files)
-public/admin.*         the audit dashboard
+public/admin.*         the admin dashboard
 public/pieces/         piece images (cburnett set, see LICENSE.txt there)
 test/                  node:test suites; test/helpers.js has the fake Tavus API
 ```
