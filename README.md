@@ -32,7 +32,24 @@ In a session, try saying:
 - **Four coaches.** Anna, Victor, Helen and Darius: each has a face, a voice and a way of coaching.
 - **Memory.** The coach opens each session knowing what you solved, what you missed and how your games went.
 
+## Why chess
+
+Chess is a domain where a language model is confidently wrong and the right answer can be checked. That makes it a hard test of the things a video agent needs in any real deployment: staying grounded in facts it did not invent, acting through tools instead of describing actions, and leaving a record that explains what it said.
+
 ## How it works
+
+```mermaid
+flowchart LR
+  S[Student] -- voice and video --> P[PAL on Tavus CVI]
+  S -- moves --> B[Board in the browser]
+  B -- "what happened, in plain English" --> P
+  P -- "tool calls: start a game, point, review" --> B
+  B -- positions --> N[Node server]
+  N --> E[Stockfish]
+  N --> D[(Postgres: sessions, memory, full log)]
+  N -- "setup, memory stores, webhooks" --> T[Tavus API]
+```
+
 
 - **The model never does chess.** The board validates every move and Stockfish judges it. The coach is told the position and the verdict in plain English.
 - **The coach acts through eleven tools**: analyze a move, point at squares, load a puzzle, start a game, take back a move, open a review, jump to a move. The browser carries them out and reports back.
