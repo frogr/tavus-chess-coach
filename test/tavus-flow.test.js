@@ -13,14 +13,14 @@ const config = async (app) => {
 };
 const env = (tavus, extra = {}) => ({ TAVUS_API_KEY: 'test-key', TAVUS_API_BASE: tavus.base, ACCESS_CODE: CODE, ...extra });
 
-test('a fresh boot registers 9 tools and a PAL per coach, and config waits for it', async (t) => {
+test('a fresh boot registers 11 tools and a PAL per coach, and config waits for it', async (t) => {
   const tavus = await startFakeTavus();
   const app = await startServer(env(tavus));
   t.after(() => Promise.all([app.stop(), tavus.stop()]));
 
   // Asked immediately after boot: must wait for setup instead of reporting "not configured".
   assert.deepEqual(await config(app), { tavusReady: true, needsCode: true, coaches: COACH_KEYS });
-  assert.equal(tavus.db.tools.length, 9);
+  assert.equal(tavus.db.tools.length, 11);
   assert.equal(tavus.db.pals.length, 4);
   assert.equal(new Set(tavus.db.pals.map((p) => p.pal_name)).size, 4);
   assert.match(app.output(), /PAL ready: p\w+/);

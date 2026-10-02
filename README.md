@@ -44,7 +44,7 @@ Needs Node 20 or later (`.node-version` pins 22).
 ```
 npm install
 cp .env.example .env        # add TAVUS_API_KEY
-npm run setup               # registers 9 tools and one PAL per coach, writes .tavus.json
+npm run setup               # registers 11 tools and one PAL per coach, writes .tavus.json
 npm start                   # http://localhost:3000
 npm test                    # Tavus is faked: no key or minutes needed
 ```
@@ -114,7 +114,7 @@ curl https://<your-app>/healthz        # reports the commit that is live
 │  Board (chess.js)  ── source of truth   │          │  One PAL per coach   │
 │        │                                │  app     │  Raven-1 perception   │
 │        ├─ student moves ──► respond ────┼─message─►│  Sparrow-2 (patient)  │
-│        ├─ quiet moves ──► append_context│  (Daily) │  LLM + 9 tools        │
+│        ├─ quiet moves ──► append_context│  (Daily) │  LLM + 11 tools        │
 │        │                                │          │  memory per student   │
 │  Tool handlers ◄─── conversation.tool_call ────────┤                      │
 │        │        ───► conversation.tool_result ────►│                      │
@@ -132,7 +132,7 @@ curl https://<your-app>/healthz        # reports the commit that is live
 Traffic runs in two directions, both over the Tavus interaction protocol:
 
 1. **Board to coach.** What happens on the board is sent to the PAL tagged `[board]`, already annotated with ground truth: whether a move was correct, what the engine says it allowed, what the opponent replied. Events the coach should react to out loud go as `conversation.respond`. Events it only needs to know go as `conversation.append_llm_context`. A puzzle's solution is included and marked for the coach only, so hints are graded instead of guessed.
-2. **Coach to board.** Nine tools, delivered to the browser as app messages and handled there.
+2. **Coach to board.** Eleven tools, delivered to the browser as app messages and handled there.
 
 ## The coach's tools
 
@@ -146,7 +146,11 @@ Traffic runs in two directions, both over the Tavus interaction protocol:
 | `chess_show_engine_line` | Animates the engine's line, then returns to the position | `static_filler` / `generate_response` | "Watch this" while the pieces move, then the coach explains |
 | `chess_new_game` | Starts a game against the coach at a strength and color | `silent` / `generate_response` | "Play me, but go easy" works by voice |
 | `chess_take_back` | Undoes the student's last move and the coach's answer | `silent` / `generate_response` | Only when the student asks; the coach never offers one |
-| `chess_review_game` | Loads the game just played into review | `static_filler` / `generate_response` | The engine pass takes a few seconds |
+| `chess_review_game` | Opens a game in review: the one from this call, else the newest saved game; `game=N` picks a saved game, `chesscom_username` loads from chess.com | `static_filler` / `generate_response` | The engine pass takes a few seconds |
+| `chess_goto_move` | In review, puts the board on a given move | `silent` / `generate_response` | "Go to move 12" |
+| `chess_open` | Switches the screen back to the puzzle, the game or the review already open | `silent` / `generate_response` | Moving around without loading anything new |
+
+The coach drives the app: the prompt tells it to call a tool for any request to switch, never to send the student to a tab. When a call starts, and whenever the student switches tabs themselves, the board tells the coach what is on screen and which saved games exist. Games against a coach are saved in the browser after every move, so a game from an earlier call, finished or not, can be reviewed in the next one.
 
 The definitions and the system prompt are in `server/pal-config.js`.
 

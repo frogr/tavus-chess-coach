@@ -84,7 +84,7 @@ const TOOLS = [
   {
     name: 'chess_goto_moment',
     description:
-      'Game review only. Jump the board to one of the engine-found key moments in the student\'s game: the position just ' +
+      'In a game review: jump the board to one of the engine-found key moments in the student\'s game: the position just ' +
       'before their mistake, ready for them to try a better move. Moments are numbered from 1 in the [board] review summary.',
     parameters: {
       type: 'object',
@@ -136,11 +136,51 @@ const TOOLS = [
   {
     name: 'chess_review_game',
     description:
-      'Load the game the student just played against you into game review, so you can go through their key mistakes together. ' +
-      'Use it after the game ends, or when they stop early, if they want to look back at it.',
-    parameters: { type: 'object', properties: {} },
+      'Open a game in game review so you can go through the student\'s key mistakes together. Call it whenever they ask to review, ' +
+      'look back at, or go over a game. With no arguments it opens the game from this call, or else their most recent saved game ' +
+      '(games against any coach are saved between calls, so "the game we just played" may be from an earlier call: call this anyway). ' +
+      'With game=N it opens saved game N from the list the board gave you. With chesscom_username it loads their recent chess.com games and opens the latest.',
+    parameters: {
+      type: 'object',
+      properties: {
+        game: { type: 'integer', description: 'Optional. Which saved game, 1 = most recent.' },
+        chesscom_username: { type: 'string', description: 'Optional. Their chess.com username, to review a game they played there.' },
+      },
+    },
     on_call: 'static_filler',
     static_filler: 'Give me a moment to go back through the game.',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_goto_move',
+    description:
+      'In a game review: put the board on a specific move of the game, e.g. "go to move 12" or "show me Black\'s tenth move". ' +
+      'The board shows the position right after that move.',
+    parameters: {
+      type: 'object',
+      properties: {
+        move_number: { type: 'integer', description: 'The move number as chess players count it, starting at 1.' },
+        side: { type: 'string', enum: ['white', 'black'], description: 'Whose move. Default white.' },
+      },
+      required: ['move_number'],
+    },
+    on_call: 'silent',
+    on_resolve: 'generate_response',
+    delivery: { app_message: true },
+  },
+  {
+    name: 'chess_open',
+    description:
+      'Switch the student\'s screen to another part of the app without loading anything new: "puzzles" goes back to the current puzzle, ' +
+      '"game" goes back to the game against you, "review" goes back to the game being reviewed. ' +
+      'Use it for "let\'s go back to the puzzle", "back to our game", "back to the review".',
+    parameters: {
+      type: 'object',
+      properties: { view: { type: 'string', enum: ['puzzles', 'game', 'review'] } },
+      required: ['view'],
+    },
+    on_call: 'silent',
     on_resolve: 'generate_response',
     delivery: { app_message: true },
   },
@@ -187,6 +227,14 @@ You are ${coach.name}, a chess coach on a live video call. ${coach.persona} The 
 - Never offer a take-back. They have a button for it and can ask. Use chess_take_back only when they ask.
 - At every strength, answer questions about the position honestly, and check with chess_analyze_position first. Don't give away the best move unless they ask for it directly.
 - When the game ends, say in a sentence or two what decided it. Then offer to go through it together with chess_review_game, or a rematch with chess_new_game at a strength that fits how the game went.
+
+## Moving around the app
+- The app has three parts: puzzles, a game against you, and game review. You drive it. When the student asks for any of them, call the tool yourself; never tell them to click a tab or a button for something a tool can do.
+- Puzzles: chess_load_puzzle. Playing you: chess_new_game (ask what strength if they haven't said). Reviewing: chess_review_game. Going back to something already open: chess_open.
+- Any request to review, go over or look back at a game means: call chess_review_game right away. Don't ask which game first, and never say there is no game or that you didn't play without calling it: games are saved between calls, and the tool finds the right one or tells you what the options are.
+- If a tool says something isn't available, say so plainly and offer what it suggests. Don't contradict your notes about earlier sessions: a game from an earlier call happened, even though it wasn't in this call.
+- After a switch, carry on from the [board] result as if you had turned the page yourself. One sentence to bridge, then the chess.
+- Never say you did something on the board (took a move back, loaded a puzzle, opened a game, started a game) unless you called the tool for it in this turn. Saying it does not do it.
 
 ## Memory
 - You may have notes about this student from earlier sessions: a pinned "Student profile" with their totals across every session, pinned "Session note" facts for their most recent sessions (both written by the board app: ground truth about what they solved, missed, and needed hints on), and things you learned from past conversations.

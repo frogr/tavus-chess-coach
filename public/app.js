@@ -1019,6 +1019,7 @@ async function gameMove(from, to, promotion = 'q') {
   end = outcome(g);
   if (end) return sendRespond(finishGame(g, end[0], end[1], text));
 
+  saveGame(g);
   const level = RATINGS.indexOf(g.rating);
   g.quiet += 1;
   // A costly move gets a remark, but not two moves running: nobody wants a comment on every slip.
@@ -1077,6 +1078,7 @@ async function takeBack() {
   state.highlights = [];
   state.arrows = [];
   audit('play.takeback', { san });
+  saveGame(g);
   renderGame();
   const { text } = await api('/api/describe', { fen: g.chess.fen() }).catch(() => ({ text: '' }));
   return `[board] ${playerName()} took back ${san}. It is their move again. Position now: ${text}`;
@@ -1098,11 +1100,13 @@ const GAMES_KEY = 'coach-rook-games';
 function savedGames() {
   try { return JSON.parse(localStorage.getItem(GAMES_KEY) || '[]'); } catch { return []; }
 }
+// Called after every move, so a game survives a closed tab or a call that ends
+// mid-game; the entry for a game is replaced as it grows.
 function saveGame(g) {
-  if (g.saved || g.sans.length < 4) return;
-  g.saved = true;
-  const entry = { at: Date.now(), opponent: coachName(), rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), pgn: gamePgn(g) };
-  try { localStorage.setItem(GAMES_KEY, JSON.stringify([entry, ...savedGames()].slice(0, 30))); } catch {}
+  if (g.sans.length < 4) return;
+  g.id ||= `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const entry = { id: g.id, at: Date.now(), opponent: g.opponent || coachName(), rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), pgn: gamePgn(g) };
+  try { localStorage.setItem(GAMES_KEY, JSON.stringify([entry, ...savedGames().filter((x) => x.id !== g.id)].slice(0, 30))); } catch {}
   renderHistory();
 }
 
@@ -1171,14 +1175,104 @@ async function loadChesscom(user) {
     });
 }
 
-// Loads the game just played into review mode. Returns the review context for the coach.
-async function reviewPlayedGame({ announce = true } = {}) {
-  const g = state.game;
-  if (!g || g.sans.length < 2) return 'There is no game to review yet.';
-  if (!g.over) finishGame(g, 'unfinished', 'Game stopped');
-  const review = await loadReview(gamePgn(g), g.color, { announce });
+// The games the coach can open for review, newest first, one line each.
+function gameShelf(limit = 5) {
+  const ago = (at) => {
+    const h = (Date.now() - at) / 3600000;
+    return h < 1 ? 'within the last hour' : h < 20 ? 'earlier today' : h < 44 ? 'yesterday' : `${Math.round(h / 24)} days ago`;
+  };
+  return savedGames()
+    .slice(0, limit)
+    .map((g, i) => `${i + 1}) against ${g.opponent} at strength ${g.rating}, the student was ${sideName(g.color)}, ${(RESULT_WORD[g.result] || 'unfinished').toLowerCase()}, ${g.moves} moves, ${ago(g.at)}`);
+}
+const shelfText = () => {
+  const shelf = gameShelf();
+  return shelf.length
+    ? `Saved games the student played against a coach, newest first (chess_review_game with game=N opens one): ${shelf.join('; ')}.`
+    : 'There are no saved games against a coach in this browser yet.';
+};
+
+// Opens a game in review and returns what the coach should know about it.
+// With nothing asked for: the game from this call, else the newest saved game
+// (so "the game we just played" still works in a new call).
+async function reviewPlayedGame({ announce = true, game, chesscom } = {}) {
+  const lead = (what) => `${what} Give your overall impression in a sentence and offer to start with the first key moment.`;
+  if (chesscom) {
+    let games;
+    try {
+      games = await loadChesscom(String(chesscom).trim());
+    } catch (e) {
+      return `${e.message} Ask the student to spell their chess.com username.`;
+    }
+    if (!games.length) return `chess.com has no recent games for "${chesscom}".`;
+    state.chesscom = games;
+    renderHistory();
+    const g = games[Math.max(0, Math.min(games.length - 1, (Number(game) || 1) - 1))];
+    const review = await loadReview(g.pgn, g.me === 'white' ? 'w' : 'b', { announce });
+    return review ? lead(`${review.context} This is the student's chess.com game against ${g.opponent} (${g.oppRating}); they were ${g.me}.`) : 'The game could not be analyzed.';
+  }
+  const saved = savedGames();
+  const n = Number(game);
+  const current = state.game && state.game.sans.length >= 2 ? state.game : null;
+  if (!n && current) {
+    if (!current.over) finishGame(current, 'unfinished', 'Game stopped');
+    const review = await loadReview(gamePgn(current), current.color, { announce });
+    return review ? lead(`${review.context} This is the game they just played against you.`) : 'The game could not be analyzed.';
+  }
+  const entry = saved[n ? n - 1 : 0];
+  if (!entry) {
+    return n
+      ? `There is no saved game number ${n}. ${shelfText()}`
+      : 'There is no game to review: none was played in this call and none is saved in this browser. Offer the options: play a game now (chess_new_game), ' +
+          'load their chess.com games (chess_review_game with chesscom_username), or they can paste a PGN or Lichess link in the Review tab.';
+  }
+  const review = await loadReview(entry.pgn, entry.color, { announce });
   if (!review) return 'The game could not be analyzed.';
-  return `${review.context} This is the game they just played against you. Give your overall impression in a sentence and offer to start with the first key moment.`;
+  return lead(`${review.context} This is a saved game: the student played ${sideName(entry.color)} against ${entry.opponent} at strength ${entry.rating} (${RESULT_WORD[entry.result] || 'unfinished'}). It was an earlier game, possibly from an earlier call; treat it as the game they mean.`);
+}
+
+// Review: put the board on a given move of the loaded game.
+async function gotoMove(number, side) {
+  const r = state.review;
+  if (state.mode !== 'review' || !r) return `No game is open in review. ${shelfText()}`;
+  const ply = Math.max(0, Math.min(r.moves.length, (Math.max(1, Number(number) || 1) - 1) * 2 + (String(side).toLowerCase() === 'black' ? 2 : 1)));
+  gotoPly(ply);
+  const m = r.moves[ply - 1];
+  if (!m) return 'The board shows the starting position of the game.';
+  const { text } = await api('/api/describe', { fen: m.fenAfter }).catch(() => ({ text: '(piece list unavailable)' }));
+  return (
+    `The board shows the position after ${moveLabel(m)}. Evaluation: ${evalText(m.evalAfter)} from White's side. ` +
+    (m.class ? `The engine marks it as ${m.class === 'inaccuracy' ? 'an' : 'a'} ${m.class} and preferred ${m.bestSan} (drawn as an arrow). ` : '') +
+    `Position: ${text}`
+  );
+}
+
+// Moves the student to another part of the app without loading anything new.
+async function openView(view) {
+  if (view === 'puzzles') {
+    const context = await loadPuzzle({ which: 'retry' }, { announce: false });
+    return context.error || `${context} The student is back on this puzzle.`;
+  }
+  if (view === 'game') {
+    if (!state.game) return 'No game has been started in this call. Ask what strength they want and call chess_new_game.';
+    showPlay();
+    return `${await gameContext()} ${state.game.over ? 'That game is over: offer a rematch (chess_new_game) or a review (chess_review_game).' : 'The game is still going; carry on.'}`;
+  }
+  if (!state.review) return `No game is open in review yet. ${shelfText()} Or use chess_review_game with chesscom_username.`;
+  setMode('review');
+  gotoPly(state.reviewPly);
+  return `${state.review.context} The review is back on screen.`;
+}
+
+// What the coach should know about the app beyond the board in front of it.
+function appBrief() {
+  const g = state.game;
+  return (
+    `[board] What the app has ready. On screen: ${{ puzzle: 'a puzzle', play: 'the game against you', review: 'game review' }[state.mode]}. ` +
+    `Game against you in this call: ${g ? (g.over ? `finished (${g.reason})` : 'in progress') : 'none yet'}. ` +
+    `${shelfText()} The student's puzzle rating is ${state.rating}. ` +
+    'You can take them anywhere without them clicking: chess_load_puzzle for a puzzle, chess_new_game to play you, chess_review_game to review a game, chess_open to go back to something already open.'
+  );
 }
 
 // What the coach needs when a call starts with a game already on the board.
@@ -1235,8 +1329,18 @@ const TOOL_HANDLERS = {
   },
 
   async chess_goto_moment(args) {
-    if (state.mode !== 'review' || !state.review) return 'No game is loaded for review. The student can paste one in the "Review a game" tab.';
+    if (!state.review) return `No game is open in review. Call chess_review_game first. ${shelfText()}`;
+    if (state.mode !== 'review') setMode('review');
     return gotoMoment(Number(args.moment) || 1);
+  },
+
+  async chess_goto_move(args) {
+    return gotoMove(args.move_number, args.side);
+  },
+
+  async chess_open(args) {
+    const view = ['puzzles', 'game', 'review'].includes(args.view) ? args.view : 'puzzles';
+    return openView(view);
   },
 
   async chess_show_engine_line() {
@@ -1253,8 +1357,8 @@ const TOOL_HANDLERS = {
     return takeBack();
   },
 
-  async chess_review_game() {
-    return reviewPlayedGame({ announce: false });
+  async chess_review_game(args) {
+    return reviewPlayedGame({ announce: false, game: args.game, chesscom: args.chesscom_username });
   },
 };
 
@@ -1434,6 +1538,7 @@ async function startSession() {
       if (state.mode === 'review' && state.review) sendContext(state.review.context);
       else if (state.mode === 'play' && state.game) sendContext(await gameContext());
       else sendContext(await puzzleContext(puzzle()) + (state.ply ? ` Moves played so far: ${state.sanLog.join(' ')}.` : ''));
+      sendContext(appBrief());
     });
     call.on('participant-left', (ev) => {
       if (ev.participant?.local) return;
@@ -1628,6 +1733,7 @@ function setupCoaches(coaches) {
 function setupSim() {
   $('sim').hidden = false;
   const fake = (name, args) => handleToolCall({ name, arguments: JSON.stringify(args), tool_call_id: 'sim_' + Date.now() });
+  window.simTool = fake; // for scripted checks
   $('sim').addEventListener('click', (e) => {
     const which = e.target.dataset.sim;
     if (which === 'analyze') fake('chess_analyze_position', { candidate_move: state.chess.moves()[0] });
@@ -1642,6 +1748,8 @@ function setupSim() {
     if (which === 'game') fake('chess_new_game', { strength: 1000, color: 'white' });
     if (which === 'takeback') fake('chess_take_back', {});
     if (which === 'reviewgame') fake('chess_review_game', {});
+    if (which === 'gotomove') fake('chess_goto_move', { move_number: 2, side: 'black' });
+    if (which === 'open') fake('chess_open', { view: e.target.dataset.view });
   });
 }
 
@@ -1694,12 +1802,21 @@ async function boot() {
   });
   document.querySelectorAll('[data-tab]').forEach((t) =>
     t.addEventListener('click', () => {
+      const live = Boolean(state.conversationId);
       if (t.dataset.tab === 'puzzle') loadPuzzle({ which: 'retry' });
-      else if (t.dataset.tab === 'play') showPlay();
-      else {
+      else if (t.dataset.tab === 'play') {
+        showPlay();
+        if (live) {
+          if (state.game) gameContext().then((c) => sendContext(`${c} The student switched to this game themselves.`));
+          else sendContext('[board] The student opened the Play tab. No game has started. They can pick a strength and press New game, or you can start one with chess_new_game.');
+        }
+      } else {
         setMode('review');
-        if (state.review) gotoPly(state.reviewPly);
-        else {
+        if (state.review) {
+          gotoPly(state.reviewPly);
+          if (live) sendContext(`${state.review.context} The student switched back to this review themselves.`);
+        } else {
+          if (live) sendContext(`[board] The student opened the Review tab. No game is loaded yet. ${shelfText()} They can also paste a PGN or load chess.com games; you can open a saved game with chess_review_game.`);
           $('pTitle').textContent = 'Review a game';
           $('pLevel').textContent = '\u00a0';
           setStatus('');

@@ -163,7 +163,7 @@ update student_sessions set tag = '<new tag>' where tag = '<old tag>';
 ```
 
   The next sync pins the rebuilt profile and notes under the new key.
-- **Sessions from before the ledger existed.** `node scripts/backfill-ledger.js` copies them from the audit log. It was run on 2026-10-02 (2 of 15 audited sessions had a student and a board summary). The audit log keeps session records but prunes events after 90 days.
+- **Sessions from before the ledger existed.** `node scripts/backfill-ledger.js` copies them from the audit log into the ledger of whichever database `DATABASE_URL` points at. It has been run against the development database only (2026-10-02); to backfill production, run it with production's `DATABASE_URL`. The audit log keeps session records but prunes events after 90 days.
 
 ## Tavus limits this relies on
 
