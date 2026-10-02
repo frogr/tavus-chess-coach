@@ -1,0 +1,13 @@
+# The free Render instance sleeps after 15 idle minutes and takes about 30
+# seconds to wake. This keeps it awake so a visitor's first click is fast.
+# Delete this file to let it sleep again.
+name: Keep the site awake
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --max-time 90 https://coach-rook.onrender.com/healthz

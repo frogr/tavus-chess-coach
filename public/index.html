@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="A live video chess coach that watches your board. Solve puzzles, play the coach, or review your own games, and ask questions out loud." />
+  <meta property="og:title" content="Coach Rook" />
+  <meta property="og:description" content="A live video chess coach that watches your board. Puzzles, games against the coach, and review of your own games." />
+  <meta property="og:image" content="https://coach-rook.onrender.com/ad-poster.jpg" />
+  <meta property="og:url" content="https://coach-rook.onrender.com/" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <title>Coach Rook</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -31,10 +39,13 @@
           <input id="code" type="password" maxlength="60" autocomplete="off" placeholder="Access code" aria-label="Access code" hidden />
           <button id="start" class="primary">Start session</button>
           <p id="lobbyError" class="error" role="alert"></p>
+          <p id="lobbyHint" class="lobby-hint">Starts a live video call with your coach.<span id="codeHint" hidden> It needs an access code; the board works without one.</span></p>
+          <p class="lobby-hint">Sessions are logged to debug the coach: the transcript, board activity and a description of what the camera saw. No audio or video is kept.</p>
         </form>
 
         <div class="connecting">
           <div class="spinner" role="status" aria-label="Connecting"></div>
+          <p id="connectingNote" class="lobby-hint"></p>
           <button id="cancelCall" class="quiet small">Cancel</button>
         </div>
 
@@ -141,6 +152,7 @@
         <button id="next" class="quiet">Next</button>
         <span class="moves" id="moves"></span>
       </div>
+      <p id="stuckHint" class="lobby-hint puzzle-only">Stuck? Start a session and ask the coach for a hint.</p>
 
       <div class="play-only play">
         <div id="gameBar" hidden>

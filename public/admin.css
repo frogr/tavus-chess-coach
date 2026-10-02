@@ -80,3 +80,8 @@ th:last-child { width: 40%; }
   .line { grid-template-columns: 1fr; gap: 0; }
   .quiet-link { display: none; }
 }
+
+@media (max-width: 900px) {
+  .admin .topbar { flex-wrap: wrap; gap: 10px 18px; }
+  #view { overflow-x: auto; }
+}

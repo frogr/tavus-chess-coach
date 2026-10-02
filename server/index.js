@@ -577,7 +577,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
-  '.jpg': 'image/jpeg',
+  '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
   '.mp4': 'video/mp4',
   '.json': 'application/json; charset=utf-8',
   '.pgn': 'text/plain; charset=utf-8',

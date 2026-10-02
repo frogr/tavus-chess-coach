@@ -2,6 +2,13 @@
 
 A live video chess coach built on Tavus CVI. You work on a real board while a coach on video watches every move, talks it through with you, and points at the squares it means. The coach is never trusted to work out chess: the board validates moves and Stockfish judges them.
 
+[![A recorded call with Coach Rook: the coach on the left, the reviewed game on the right](public/live-call-poster.jpg)](https://coach-rook.onrender.com/about)
+
+**Watch** on the [About page](https://coach-rook.onrender.com/about), or directly:
+
+- **The ad** (45 seconds): https://coach-rook.onrender.com/ad.mp4
+- **A real call** (90 seconds, uncut): https://coach-rook.onrender.com/live-call.mp4. A puzzle, then the student asks for a game, a review of it, the move where it went wrong, and to go back to puzzles; the coach does each. The coach's replies are live and unscripted. The student's requests were typed (`?typed`), not spoken.
+
 - **App:** https://coach-rook.onrender.com (the board is open; a video session needs the access code)
 - **About page:** https://coach-rook.onrender.com/about
 - **Admin:** https://coach-rook.onrender.com/admin (needs the admin token)
@@ -13,13 +20,6 @@ Three modes:
 - **Review.** Paste a PGN or a Lichess link, or load recent games by chess.com username. Stockfish scores every move and picks out the costliest. The coach takes you back to the position before each one, asks what you were thinking, and lets you find a better move before showing the engine's line.
 
 There are four coaches to choose from, each with its own face, voice and manner. The coach remembers you between sessions.
-
-## Watch
-
-- **The ad** (45 seconds): https://coach-rook.onrender.com/ad.mp4
-- **A real call** (90 seconds, uncut): https://coach-rook.onrender.com/live-call.mp4. A puzzle, then the student asks for a game, a review of it, the move where it went wrong, and to go back to puzzles; the coach does each. The coach's replies are live and unscripted. The student's requests were typed (`?typed`), not spoken.
-
-Both are on the [About page](https://coach-rook.onrender.com/about).
 
 ## Contents
 
@@ -201,7 +201,7 @@ Review and play share the parts of a chess site's game view, in `public/gameview
 
 During a game against the coach only the move list shows, since the evaluation would give the game away.
 
-The Review tab lists games to load: the ones played against the coach (kept in the browser) and a chess.com player's recent games, fetched in the browser from chess.com's public archives.
+The Review tab lists games to load: the ones played against the coach (saved in the browser and on the server) and a chess.com player's recent games, fetched in the browser from chess.com's public archives.
 
 ## Memory
 
@@ -271,7 +271,7 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 
 ## Tests and CI
 
-`npm test` runs 89 tests with `node:test`: the engine wrapper, review scoring, move choice at each strength, puzzle selection, memory (sanitizing, the profile, sync and repair, a 10,000-session run), the HTTP surface, and the Tavus-facing flows (boot setup, sessions, memory, audit) against a fake Tavus API in `test/helpers.js`. CI (`.github/workflows/ci.yml`) runs them plus `npm run verify-puzzles` on every push.
+`npm test` runs 90 tests with `node:test`: the engine wrapper, review scoring, move choice at each strength, puzzle selection, memory (sanitizing, the profile, sync and repair, a 10,000-session run), the HTTP surface, and the Tavus-facing flows (boot setup, sessions, memory, audit) against a fake Tavus API in `test/helpers.js`. CI (`.github/workflows/ci.yml`) runs them plus `npm run verify-puzzles` on every push.
 
 There are no browser tests. The UI is checked by hand and with the `?sim=1` simulator.
 

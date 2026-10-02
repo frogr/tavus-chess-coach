@@ -66,9 +66,12 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 
 /* layout: coach on the left, board on the right, both the same height */
 .layout { display: grid; grid-template-columns: minmax(320px, 440px) var(--board-size); gap: 28px; justify-content: center; align-items: start; padding: 24px 16px 40px; }
+/* One column: the board first, then the moves and step buttons that drive it, then the coach. */
 @media (max-width: 1020px) {
-  .layout { grid-template-columns: min(100%, var(--board-size)); }
-  .board-col { order: -1; }
+  .layout { grid-template-columns: min(100%, var(--board-size)); row-gap: 12px; }
+  .coach-col { display: contents; }
+  .board-col { order: -2; }
+  #gamePanel { order: -1; }
 }
 
 /* coach column */
@@ -90,6 +93,10 @@ input, select, textarea { background: var(--bg); border: 1px solid var(--line-st
 .coach[aria-checked="true"] img, .coach:hover img { filter: none; }
 .coach-style { margin: -2px 0 4px; }
 .lobby .error:empty { display: none; }
+.lobby-hint { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--dim); }
+.connecting .lobby-hint { text-align: center; max-width: 260px; }
+#stuckHint { margin-top: 10px; }
+body.in-call #stuckHint { display: none; }
 
 .connecting { position: absolute; inset: 0; place-content: center; justify-items: center; gap: 14px; color: var(--muted); }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }

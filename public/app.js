@@ -505,6 +505,13 @@ function evalText(cp) {
   return `${cp > 0 ? '+' : ''}${(cp / 100).toFixed(1)}`;
 }
 
+// The heading above the board in review: the game's players, result and event.
+function reviewHeading() {
+  const h = state.review?.headers;
+  $('pTitle').textContent = h ? `${h.White} vs ${h.Black}` : 'Review a game';
+  $('pLevel').textContent = h ? `${h.Result}${h.Event ? ' · ' + h.Event : ''}` : '\u00a0';
+}
+
 // Resolves to the review, or null if the game could not be analyzed.
 async function loadReview(pgn, side, { announce = true } = {}) {
   setMode('review');
@@ -518,9 +525,9 @@ async function loadReview(pgn, side, { announce = true } = {}) {
     state.review = review;
     state.orientation = side === 'b' ? 'b' : 'w';
     const h = review.headers;
-    $('pTitle').textContent = `${h.White} vs ${h.Black}`;
-    $('pLevel').textContent = `${h.Result}${h.Event ? ' · ' + h.Event : ''}`;
+    reviewHeading();
     renderReviewPanel();
+    $('reviewInput').open = false; // the game is loaded; keep the board and its controls together
     gotoPly(0);
     log('review', 'in', `Analyzed ${review.moves.length} half-moves, ${review.keyMoments.length} key moments`);
     audit('review.load', { pgn, side, headers: h, keyMoments: review.keyMoments, moves: review.moves.map((m) => `${m.san}${m.symbol}`) });
@@ -539,6 +546,7 @@ async function loadReview(pgn, side, { announce = true } = {}) {
     }
     return review;
   } catch (e) {
+    reviewHeading(); // back to the game that was open, or the empty heading
     setStatus(e.message, 'bad');
     log('error', 'err', e.message);
     return null;
@@ -1314,6 +1322,7 @@ async function openView(view) {
   }
   if (!state.review) return `No game is open in review yet. ${shelfText()} Or use chess_review_game with chesscom_username.`;
   setMode('review');
+  reviewHeading();
   gotoPly(state.reviewPly);
   return `${state.review.context} The review is back on screen.`;
 }
@@ -1498,6 +1507,7 @@ function onAppMessage(ev) {
 // coach's video ourselves, so the panel shows the coach and nothing else.
 const setStage = (name) => {
   $('stage').dataset.state = name;
+  document.body.classList.toggle('in-call', name === 'live');
   $('callBar').hidden = name !== 'live';
 };
 
@@ -1561,8 +1571,14 @@ async function startSession() {
   state.player = $('player').value.trim();
   try { localStorage.setItem('coach-rook-player', state.player); } catch {}
   $('lobbyError').textContent = '';
+  if (!$('code').hidden && !$('code').value.trim()) {
+    $('lobbyError').textContent = 'Enter the access code from your invite.';
+    $('code').focus();
+    return;
+  }
   $('caption').textContent = '';
   $('stageNote').textContent = '';
+  $('connectingNote').textContent = `Calling ${coachName()}… allow the microphone and camera if your browser asks.`;
   setStage('connecting');
   let created = null; // conversation to end again if the video never connects
   const attempt = (state.attempt = (state.attempt || 0) + 1); // lets Cancel abandon this start
@@ -1705,7 +1721,8 @@ async function loadNotebook() {
   const name = $('player').value.trim();
   const code = $('code').value.trim();
   const box = $('notebook');
-  if (!name || !state.tavusReady || (!$('code').hidden && !code)) {
+  // A code the server already refused is not sent again: one typo costs one attempt.
+  if (!name || !state.tavusReady || (!$('code').hidden && (!code || code === state.badCode))) {
     box.hidden = true;
     return;
   }
@@ -1729,7 +1746,14 @@ async function loadNotebook() {
       li.textContent = l;
       list.appendChild(li);
     }
+    if (!list.children.length) {
+      const li = document.createElement('li');
+      li.className = 'learned';
+      li.textContent = "Nothing yet. After your first session the coach's notes about you appear here.";
+      list.appendChild(li);
+    }
   } catch (e) {
+    if (/access code/i.test(e.message)) state.badCode = code;
     box.hidden = true;
   }
 }
@@ -1867,18 +1891,26 @@ async function boot() {
         showPlay();
         if (live) {
           if (state.game) gameContext().then((c) => sendContext(`${c} The student switched to this game themselves.`));
-          else sendContext('[board] The student opened the Play tab. No game has started. They can pick a strength and press New game, or you can start one with chess_new_game.');
+          else sendContext('[board] The student opened the Play tab. No game has started. They can pick a strength and press Start game, or you can start one with chess_new_game.');
         }
       } else {
         setMode('review');
+        reviewHeading();
         if (state.review) {
           gotoPly(state.reviewPly);
           if (live) sendContext(`${state.review.context} The student switched back to this review themselves.`);
         } else {
           if (live) sendContext(`[board] The student opened the Review tab. No game is loaded yet. ${shelfText()} They can also paste a PGN or load chess.com games; you can open a saved game with chess_review_game.`);
-          $('pTitle').textContent = 'Review a game';
-          $('pLevel').textContent = '\u00a0';
+          // Nothing loaded: an empty starting position, not whatever the last tab left behind.
+          newPosition();
+          state.chess = new Chess();
+          state.lastMove = null;
+          state.selected = null;
+          state.highlights = [];
+          state.arrows = [];
+          state.badge = null;
           setStatus('');
+          render();
         }
       }
     })
@@ -1886,6 +1918,7 @@ async function boot() {
   $('reviewGo').addEventListener('click', () => {
     const pgn = $('pgn').value.trim();
     if (pgn) loadReview(pgn, $('side').value);
+    else setStatus('Paste a PGN or a Lichess link first.', 'bad');
   });
   document.querySelectorAll('[data-sample]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -1957,6 +1990,7 @@ async function boot() {
   const cfg = await api('/api/config');
   state.tavusReady = cfg.tavusReady;
   $('code').hidden = !cfg.needsCode;
+  $('codeHint').hidden = !cfg.needsCode;
   setupCoaches(cfg.coaches);
   try { $('code').value = localStorage.getItem('coach-rook-code') || ''; } catch {}
   const refresh = () => {
