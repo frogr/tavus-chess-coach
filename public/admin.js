@@ -88,8 +88,10 @@ const row = (route, ...cells) =>
   h('tr', { class: 'link', tabindex: '0', onclick: () => go(route), onkeydown: (e) => e.key === 'Enter' && go(route) }, ...cells);
 
 async function showOverview(which) {
-  const { stats, sessions, visits } = await get('/api/admin/overview');
-  $('storeInfo').textContent = `${stats.events.toLocaleString()} events · ${stats.store} · ${stats.retention_days}-day retention`;
+  const { stats, memory, sessions, visits } = await get('/api/admin/overview');
+  const drift = memory?.out_of_sync?.length || 0;
+  const memoryInfo = !memory || memory.error ? 'memory ledger unavailable' : `memory: ${memory.students} students, ${memory.sessions} sessions, ${drift ? `${drift} coach stores out of sync` : 'in sync'}`;
+  $('storeInfo').textContent = `${stats.events.toLocaleString()} events · ${stats.store} · ${stats.retention_days}-day retention · ${memoryInfo}`;
   if (which === 'visits') {
     view.replaceChildren(
       visits.length
@@ -291,7 +293,9 @@ async function showSession(id, refresh) {
           ...fact('Context sent', d.context),
           ...fact('Memory notes sent', d.notes_sent?.length ? d.notes_sent.join(' ') : null),
           ...fact('Board summary', boardSummary(d.summary)),
+          ...fact('Profile sent', d.profile_sent || null),
           ...fact('Note saved', d.note_saved ? d.note : null),
+          ...fact('Note pinned', d.note_saved ? (d.note_pinned ? 'all coaches' : `not everywhere: ${(d.memory_sync || []).filter((m) => !m.ok).map((m) => `${m.pal_id} ${m.detail || ''}`).join('; ') || 'unknown'}`) : null),
           ...fact('Tavus status', tavus.status),
           ...fact('Shutdown', d.shutdown),
           ...fact('Client', d.client_id),

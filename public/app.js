@@ -1411,6 +1411,7 @@ async function startSession() {
     if (cancelled()) throw new Error('Cancelled.');
     state.conversationId = conversation_id;
     state.sessionLog = newSessionLog();
+    lastCheckpoint = '';
     log('session', 'in', `Conversation ${conversation_id} created${returning ? ' (returning student: last session notes sent to the coach)' : ''}`);
     const call = (state.call = window.Daily.createCallObject());
     call.on('app-message', onAppMessage);
@@ -1481,6 +1482,22 @@ function sessionSummary() {
   const games = state.sessionLog.games.map((g) => ({ rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), mistakes: costliest(g) }));
   return { puzzles: Object.values(state.sessionLog.puzzles), review: state.sessionLog.review, games };
 }
+
+// The session so far goes to the server after each finished puzzle, game or
+// review try, so a crashed tab or a dead battery does not lose the note.
+let lastCheckpoint = '';
+function checkpoint() {
+  if (!state.conversationId || !state.player) return;
+  const summary = sessionSummary();
+  const json = JSON.stringify(summary);
+  if (!summary || json === lastCheckpoint) return;
+  lastCheckpoint = json;
+  api('/api/session/checkpoint', { conversation_id: state.conversationId, player: state.player, key: notebookKey(), code: $('code').value.trim(), summary }).catch(() => {
+    lastCheckpoint = '';
+  });
+}
+
+setInterval(checkpoint, 20000);
 
 // Closing the tab mid-session: still end the conversation and save the note.
 window.addEventListener('pagehide', () => {

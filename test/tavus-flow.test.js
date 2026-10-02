@@ -140,13 +140,51 @@ test('sessions: access code, conversation creation, ending, and the memory note'
     assert.match(sent.conversational_context, /RETURNING student.*fork: tried Nc5 first/);
   });
 
+  await t.test('ending the same session twice (button and unload beacon) pins the note once', async () => {
+    const again = await (
+      await app.post('/api/session/end', {
+        conversation_id: conversationId,
+        player: 'Sam Smith',
+        key: KEY,
+        code: CODE,
+        summary: { puzzles: [{ theme: 'fork', wrong: ['Nc5'], hints: 1, solved: true, gaveUp: false }], review: null },
+      })
+    ).json();
+    assert.equal(again.saved, true);
+    assert.equal(again.pinned, true);
+    assert.ok(tavus.db.stores.every((s) => s.pinned_memories.length === 1));
+  });
+
+  await t.test('a checkpoint with no end-of-call report is pinned when the next session starts', async () => {
+    const started = await (await app.post('/api/session', { player: 'Sam Smith', key: KEY, code: CODE })).json();
+    const cp = await app.post('/api/session/checkpoint', {
+      conversation_id: started.conversation_id,
+      player: 'Sam Smith',
+      key: KEY,
+      code: CODE,
+      summary: { puzzles: [{ theme: 'pin', wrong: [], hints: 0, solved: true, gaveUp: false }] },
+    });
+    assert.deepEqual(await cp.json(), { ok: true, saved: true });
+    assert.equal(tavus.db.stores[0].pinned_memories.length, 1, 'a checkpoint writes to the ledger only');
+    // The tab dies here. The next session repairs the store before the call begins.
+    await app.post('/api/session', { player: 'Sam Smith', key: KEY, code: CODE });
+    const texts = tavus.db.stores[0].pinned_memories.map((p) => p.memory);
+    assert.equal(texts.filter((x) => /^Session note/.test(x)).length, 2);
+    assert.ok(texts.some((x) => /^Student profile, 2 sessions since \d{4}-\d\d-\d\d\. Puzzles: 2 tried, 1 solved first try\.$/.test(x)), texts.join(' | '));
+    const sent = tavus.db.conversations.at(-1).request.conversational_context;
+    assert.match(sent, /Student profile, 2 sessions/);
+    assert.match(sent, /solved first try: pin/);
+    assert.equal((await app.post('/api/session/checkpoint', { conversation_id: 'x', player: 'Sam Smith', key: KEY, code: CODE, summary: {} })).status, 400);
+  });
+
   await t.test('someone else typing the same name, without the key, sees and changes nothing', async () => {
     const other = 'zzzzz-zzzzz-zzzzz-zzzzz';
+    const before = JSON.stringify(tavus.db.stores[0].pinned_memories);
     const mem = await (await app.post('/api/memory', { player: 'Sam Smith', key: other, code: CODE })).json();
-    assert.deepEqual(mem, { pinned: [], learned: null });
+    assert.deepEqual(mem, { pinned: [], learned: null, sessions: 0 });
     const session = await (await app.post('/api/session', { player: 'Sam Smith', key: other, code: CODE })).json();
     assert.equal(session.returning, false);
-    assert.equal(tavus.db.stores[0].pinned_memories.length, 1, "the real student's notebook is untouched");
+    assert.equal(JSON.stringify(tavus.db.stores[0].pinned_memories), before, "the real student's notebook is untouched");
     // And with no key at all the request is refused rather than falling back to the name alone.
     assert.equal((await app.post('/api/memory', { player: 'Sam Smith', code: CODE })).status, 400);
     assert.equal((await app.post('/api/session', { player: 'Sam Smith', code: CODE })).status, 400);

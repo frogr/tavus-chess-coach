@@ -59,7 +59,7 @@ Set these in `.env` locally or in the host's environment.
 |---|---|---|
 | `TAVUS_API_KEY` | none | Turns on the video coach. Stays on the server. |
 | `ACCESS_CODE` | none | If set, starting a video session (and reading memory) needs this code. Use it on any public URL: sessions spend Tavus minutes. |
-| `DATABASE_URL` | none | Postgres connection string for the audit log. Without it events are held in memory and lost on restart. |
+| `DATABASE_URL` | none | Postgres connection string for the audit log and the student ledger. Without it both are held in memory and lost on restart, which for the ledger means memory cannot be rebuilt. Set it in production. |
 | `ADMIN_TOKEN` | none | Turns on `/admin`. Use a long random value. |
 | `MAX_CALL_SECONDS` | `3600` | Longest a video session may run. 3600 is Tavus's ceiling. |
 | `AUDIT_RETENTION_DAYS` | `90` | How long audit events are kept. |
@@ -192,14 +192,17 @@ The Review tab lists games to load: the ones played against the coach (kept in t
 
 ## Memory
 
-Tavus Memory Stores, in two layers:
+Full description, guarantees and limits: [docs/MEMORY.md](docs/MEMORY.md).
 
-- **Session notes (pinned).** When a session ends, the board writes one factual note: what was solved first try, what took wrong tries or hints (and which moves), what was given up on, the mistakes from a reviewed game, and the result of any game against the coach. These come from the board, not from the model's impression of the call, and they reach the PAL from the next conversation with no processing delay.
-- **Learned memory.** Tavus maintains it from each conversation (goals mentioned, how the student likes to be coached).
+Three layers:
 
-At the next session the latest notes go into the conversation context and the greeting is generated from them. The **Notebook** panel shows what is in the store.
+- **The ledger.** Every session a student finishes is written to Postgres (`student_sessions`) and kept forever. It records what happened on the board: what was solved first try, what took wrong tries or hints (and which moves), what was given up on, reviewed games, games against the coach. This is the source of truth.
+- **Pinned memories (Tavus).** What the coach reads. Rebuilt from the ledger: one **Student profile** note with lifetime totals and recent strengths and weaknesses, plus the 12 most recent **Session notes**. A sync compares what should be pinned with what is, repairs the difference and reads it back. It runs at the end of every session for all four coaches and at the start of every session for the chosen coach, so a write that failed is repaired before the next call.
+- **Learned memory (Tavus).** Tavus maintains it from each conversation (goals mentioned, how the student likes to be coached). The app does not control or verify it.
 
-A store is keyed to the student's name plus a random **notebook key** generated in their browser, so someone else typing the same name gets an empty notebook. The key is shown in the notebook panel so it can be carried to another device. What the browser reports at session end is filtered down to known themes, real chess moves and fixed result words before it is written.
+During a call the browser checkpoints the session to the ledger every 20 seconds, so a closed laptop does not lose the note. At the next session the profile and the latest notes go into the conversation context and the greeting is generated from them. The **Notebook** panel shows what is pinned.
+
+A student is their name plus a random **notebook key** generated in their browser, so someone else typing the same name gets an empty notebook. The key is shown in the notebook panel so it can be carried to another device. What the browser reports is filtered down to known themes, real chess moves and fixed result words before it is stored.
 
 ## Audit log and admin dashboard
 
@@ -228,7 +231,8 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 | `POST /api/review` | Reviews a game from a PGN or a Lichess link. |
 | `POST /api/judge` | Judges a try at a key moment. |
 | `POST /api/session` | Starts a video session. Needs the access code. |
-| `POST /api/session/end` | Ends it and writes the session note. Needs the access code. |
+| `POST /api/session/checkpoint` | Stores the session so far in the ledger. Needs the access code. |
+| `POST /api/session/end` | Ends it, stores the session and syncs every coach's memory. Needs the access code. |
 | `POST /api/memory` | A student's notebook. Needs the access code. |
 | `POST /api/events` | Browser event reports for the audit log. |
 | `POST /api/tavus/webhook/<token>` | Tavus callbacks. |
@@ -239,7 +243,7 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 - **The model never does chess.** It asks, explains, encourages and points. Correctness comes from the board (move validation) and Stockfish (evaluation). The system prompt says so, and the tools make the right path the easy one.
 - **No FEN or UCI reaches the LLM.** LLMs misread FEN. The server turns positions into "White: king on g1; rook on d1…" and engine lines into "knight from e4 to d6, with check; White is completely winning (+7.6)".
 - **Turn-taking tuned for thinking.** Chess means long silences. `turn_taking_patience: high` stops the coach from jumping in while the student calculates, and `idle_engagement: patient` gives a nudge, not an answer, when they go quiet.
-- **Memory is written from the board.** Pinned notes record what happened; Tavus's learned memory adds the softer context.
+- **Memory is written from the board, and the app keeps its own copy.** The ledger is permanent; Tavus's pinned notes are rebuilt from it and verified after every write. Tavus's learned memory adds the softer context.
 - **STT hotwords** for chess vocabulary ("Nf3", "en passant", "skewer"), which general speech-to-text mangles.
 - **The key stays on the server.** The browser only gets a `conversation_url`.
 - **Setup is code.** `npm run setup` is idempotent: tools are matched by name and patched, each PAL is found by ID or name and patched in place. A fresh deploy configures itself on boot.
@@ -251,7 +255,7 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 
 ## Tests and CI
 
-`npm test` runs 81 tests with `node:test`: the engine wrapper, review scoring, move choice at each strength, puzzle selection, memory sanitizing, the HTTP surface, and the Tavus-facing flows (boot setup, sessions, memory, audit) against a fake Tavus API in `test/helpers.js`. CI (`.github/workflows/ci.yml`) runs them plus `npm run verify-puzzles` on every push.
+`npm test` runs 89 tests with `node:test`: the engine wrapper, review scoring, move choice at each strength, puzzle selection, memory (sanitizing, the profile, sync and repair, a 10,000-session run), the HTTP surface, and the Tavus-facing flows (boot setup, sessions, memory, audit) against a fake Tavus API in `test/helpers.js`. CI (`.github/workflows/ci.yml`) runs them plus `npm run verify-puzzles` on every push.
 
 There are no browser tests. The UI is checked by hand and with the `?sim=1` simulator.
 
@@ -260,7 +264,8 @@ There are no browser tests. The UI is checked by hand and with the `?sim=1` simu
 - **Strength ratings are labels.** They name engine settings and have not been measured against rated players.
 - **A coach move takes a few seconds** on Render's free tier, and the instance sleeps when idle.
 - **Puzzle rating, streak, seen puzzles and games against the coach live in the browser.** They do not follow a student across devices. Session notes do, with the notebook key.
-- **A notebook key is not an account.** Anyone with the name and key can read and add to that notebook.
+- **A notebook key is not an account.** Anyone with the name and key can read and add to that notebook. Lose the key and the notebook starts empty (the history stays in the ledger; see docs/MEMORY.md, Repairs).
+- **Tavus's learned memory is not verified.** Only the board-written notes are. See docs/MEMORY.md, What is not guaranteed.
 - **One access code for everyone.** There are no per-user credentials or quotas.
 - **Sessions end at an hour**, Tavus's ceiling.
 - **chess.com games are fetched by username only**, from the last two monthly archives.
@@ -289,13 +294,16 @@ server/themes.js         the 20 tactical patterns
 server/puzzle-pool.json  ~4,800 puzzles from the Lichess database, verified against our engine
 server/play.js           playing the coach: strength levels, move choice, one turn of a game
 server/review.js         game review: engine passes, mistake scoring, key moments, judging a try
-server/memory.js         student memory: session notes, sanitizing what the browser reports
+server/memory.js         student memory: session notes, the profile, syncing Tavus from the ledger
+server/ledger.js         the permanent record of every student session (Postgres or in-memory)
 server/audit.js          audit log: Postgres or in-memory store, redaction, batching
 server/limits.js         per-client rate limits
 server/env.js            .env loader
 server/errors.js         HTTP errors safe to show a client
 scripts/import-puzzles.js   rebuilds the pool from the Lichess database
 scripts/verify-puzzles.js   re-checks a random sample of the pool
+scripts/backfill-ledger.js  copies pre-ledger sessions from the audit log into the ledger
+docs/MEMORY.md           how memory works, what is guaranteed, how to check it
 public/index.html, styles.css, app.js   the app: modes, tool handlers, interaction protocol, the call
 public/board.js          board renderer: sliding pieces, drag and click moves, arrows, badges
 public/gameview.js       move list, evaluation timeline, evaluation bar, player lines

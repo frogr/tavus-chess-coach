@@ -67,7 +67,7 @@ async function startServer(env = {}) {
 // A stand-in for tavusapi.com/v2 that records every request. `state` starts
 // with whatever PALs/tools the test wants to exist already.
 async function startFakeTavus(state = {}) {
-  const db = { pals: [], tools: [], stores: [], conversations: [], requests: [], failPalPatch: false, ...state };
+  const db = { pals: [], tools: [], stores: [], conversations: [], requests: [], failPalPatch: false, failPinned: 0, ...state };
   let seq = 0;
   const id = (prefix) => `${prefix}${(++seq).toString(16).padStart(8, '0')}`;
   const server = http.createServer((req, res) => {
@@ -129,9 +129,24 @@ async function startFakeTavus(state = {}) {
         const store = db.stores.find((s) => s.memory_store_id === m[1]);
         return store ? reply(200, { ...store, learned: null }) : reply(404, {});
       }
+      // Like the real API (probed 2026-10-02): at most 500 characters per pinned
+      // memory and 30 per store, both refused with a 400; deleting twice is a 404.
+      // db.failPinned makes the next N writes or deletes fail, to test repair.
       if ((m = route.match(/^POST \/memory-stores\/(\w+)\/pinned$/))) {
         const store = db.stores.find((s) => s.memory_store_id === m[1]);
-        store.pinned_memories.push({ memory_id: id('n'), memory: body.memory, created_at: new Date().toISOString() });
+        if (db.failPinned > 0) return db.failPinned--, reply(500, { message: 'temporary failure' });
+        if (!body.memory || body.memory.length > 500) return reply(400, { error: "Bad Request. {'memory': ['Length must be between 1 and 500.']}" });
+        if (store.pinned_memories.length >= 30) return reply(400, { message: 'Pinned memory limit reached (30 per store).' });
+        const pin = { memory_id: id('n'), memory: body.memory, created_at: new Date().toISOString() };
+        store.pinned_memories.push(pin);
+        return reply(200, pin);
+      }
+      if ((m = route.match(/^DELETE \/memory-stores\/(\w+)\/pinned\/(\w+)$/))) {
+        const store = db.stores.find((s) => s.memory_store_id === m[1]);
+        if (db.failPinned > 0) return db.failPinned--, reply(500, { message: 'temporary failure' });
+        const at = store ? store.pinned_memories.findIndex((p) => p.memory_id === m[2]) : -1;
+        if (at < 0) return reply(404, {});
+        store.pinned_memories.splice(at, 1);
         return reply(200, {});
       }
       if (route === 'POST /conversations') {

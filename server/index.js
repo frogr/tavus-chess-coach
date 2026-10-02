@@ -13,9 +13,10 @@ const { nextPuzzle } = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
 const { playTurn, levelFor } = require('./play');
 const { COACHES, coachFor } = require('./coaches');
-const { cleanName, participantTag, getMemory, recordSession } = require('./memory');
+const { cleanName, participantTag, getMemory, recordSession, studentContext } = require('./memory');
 const { httpError } = require('./errors');
 const { createLimiter } = require('./limits');
+const ledger = require('./ledger');
 const audit = require('./audit');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -340,13 +341,12 @@ const routes = {
     const name = cleanName(player) || null;
     const tag = participantTag(name, key);
 
-    // Returning student? Read their session notes so the opener can pick up
-    // exactly where they left off. (Tavus also gives the PAL these pinned
-    // memories plus its learned memory; putting the latest notes in the
-    // conversational context makes the generated greeting use them.)
-    let notes = [];
-    if (tag) notes = (await getMemory(palId, name, key).catch(() => ({ pinned: [] }))).pinned.map((m) => m.text);
-    const recent = notes.filter((n) => n.startsWith('Session note')).slice(-3);
+    // Returning student? Bring this coach's memory store up to date with the
+    // ledger (repairing anything that failed to reach it earlier), and put the
+    // profile and the latest notes in the conversational context so the
+    // generated greeting picks up exactly where they left off.
+    const memory = tag ? await studentContext(palId, name, key) : { notes: [], profile: null, sync: null };
+    const recent = memory.notes;
     const returning = recent.length > 0;
 
     // The opener fits what the student has on screen: a puzzle, a game against the coach, or a review.
@@ -354,7 +354,7 @@ const routes = {
     const context = [
       name ? `The student's name is ${name}.` : null,
       returning
-        ? `This is a RETURNING student. Notes from their recent sessions, oldest first: ${recent.join(' ')} ` +
+        ? `This is a RETURNING student. ${memory.profile ? `${memory.profile} ` : ''}Notes from their recent sessions, oldest first: ${recent.join(' ')} ` +
           `Open by greeting them by name and referencing one specific thing from the most recent note (what they nailed or what tripped them up), ` +
           `then propose what to work on today, e.g. a puzzle on the theme they struggled with (use chess_load_puzzle with that theme).`
         : name
@@ -382,7 +382,7 @@ const routes = {
       },
     });
     await audit.session(convo.conversation_id, {
-      data: { player: name, coach: coach.key, participant_tag: tag, pal_id: palId, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent },
+      data: { player: name, coach: coach.key, participant_tag: tag, pal_id: palId, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent, profile_sent: memory.profile, memory_sync: memory.sync && { ok: memory.sync.ok, pinned: memory.sync.pinned, detail: memory.sync.detail } },
     });
     return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning, max_seconds: MAX_CALL_SECONDS, coach: coach.key };
   },
@@ -397,22 +397,32 @@ const routes = {
     if (valid) await tavus('POST', `/conversations/${conversation_id}/end`).catch(() => {});
     const name = cleanName(player);
     let result = { saved: false };
-    if (name && summary) {
-      // Every coach gets the note, so switching coach does not lose what happened on the board.
+    if (name && summary && valid) {
+      // The session goes into the ledger first, then every coach's store is
+      // synced from it, so switching coach does not lose what happened on the board.
       const palIds = [...new Set([cfg.pal_id, ...Object.values(cfg.pals)])];
-      result = await recordSession(cfg.pal_id, name, key, summary).catch((e) => {
-        if (e.expose) throw e;
-        console.error(`session note not saved: ${e.message}`);
-        return { saved: false, reason: 'the memory service returned an error' };
-      });
-      if (result.saved) for (const other of palIds.slice(1)) await recordSession(other, name, key, summary).catch(() => {});
+      result = await recordSession(palIds, name, key, conversation_id, summary);
     }
     if (valid) {
-      await audit.session(conversation_id, { ended_at: new Date().toISOString(), data: { summary: summary || null, note: result.note || null, note_saved: result.saved } });
+      await audit.session(conversation_id, {
+        ended_at: new Date().toISOString(),
+        data: { summary: summary || null, note: result.note || null, note_saved: result.saved, note_pinned: result.pinned ?? null, memory_sync: result.sync || null },
+      });
       // Tavus's own record of the call; the transcript arrives later by webhook.
       pullTavusRecord(conversation_id).catch(() => {});
     }
     return { ok: true, ...result };
+  },
+
+  // During a call the browser reports the session so far after each finished
+  // puzzle, game or review try. It goes into the ledger only. If the tab then
+  // dies without reporting the end, the next session's sync still pins the note.
+  'POST /api/session/checkpoint': async ({ conversation_id, player, key, code, summary }, { ip }) => {
+    checkCode(code, ip);
+    budget(limits.events, ip, 'event reports');
+    if (typeof conversation_id !== 'string' || !/^[a-z0-9]{4,64}$/i.test(conversation_id)) throw httpError(400, 'That is not a conversation.');
+    const { saved } = await recordSession([], cleanName(player), key, conversation_id, summary);
+    return { ok: true, saved };
   },
 
   // What Coach Rook remembers about a student (pinned notes + Tavus learned memory).
@@ -448,7 +458,8 @@ routes['POST /api/events'] = async ({ client, events }, { ip }) => {
 
 routes['GET /api/admin/overview'] = async (_b, { req, ip }) => {
   requireAdmin(req, ip);
-  return { stats: await audit.stats(), sessions: await audit.listSessions({ limit: 100 }), visits: await audit.listVisits({ limit: 100 }) };
+  const memory = await ledger.stats().catch((e) => ({ error: e.message }));
+  return { stats: await audit.stats(), memory, sessions: await audit.listSessions({ limit: 100 }), visits: await audit.listVisits({ limit: 100 }) };
 };
 
 routes['GET /api/admin/session'] = async (_b, { req, ip, query }) => {
@@ -631,6 +642,7 @@ process.on('unhandledRejection', (e) => {
 server.listen(PORT, async () => {
   console.log(`Coach Rook running at http://localhost:${PORT}`);
   await audit.init();
+  await ledger.init().catch((e) => console.error(`  Student ledger unavailable: ${e.message}. Session notes will not be saved until it is back.`));
   audit.record({ kind: 'server.boot', data: { commit: process.env.RENDER_GIT_COMMIT || null, node: process.version, admin: Boolean(ADMIN_TOKEN), webhook: Boolean(PUBLIC_URL) } });
   if (ADMIN_TOKEN) console.log('  Admin dashboard at /admin');
   if (!process.env.TAVUS_API_KEY) {
@@ -657,7 +669,7 @@ server.listen(PORT, async () => {
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     // Finish in-flight requests and write out any queued audit events first.
-    server.close(() => audit.close().finally(() => process.exit(0)));
+    server.close(() => Promise.allSettled([audit.close(), ledger.close()]).then(() => process.exit(0)));
     setTimeout(() => process.exit(0), 5000).unref();
   });
 }
