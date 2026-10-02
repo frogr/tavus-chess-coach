@@ -50,7 +50,7 @@ const SECURITY_HEADERS = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     "img-src 'self' data:",
-    "connect-src 'self' https://*.daily.co wss://*.daily.co https://*.pluot.blue wss://*.pluot.blue", // Daily signalling and media servers
+    "connect-src 'self' https://*.daily.co wss://*.daily.co https://*.pluot.blue wss://*.pluot.blue https://api.chess.com", // Daily signalling and media servers; chess.com's public game archives
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "object-src 'none'",

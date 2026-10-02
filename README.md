@@ -94,6 +94,10 @@ A coach waits while you think, asks instead of telling, and points at the board.
 
 A session runs for up to `MAX_CALL_SECONDS` (default and Tavus's ceiling: 3600). The time left is shown in the call bar.
 
+## The game screen
+
+Review and play share the parts of a chess site's game view: a two-column move list with mistake badges, an evaluation timeline you can click to jump through the game, an evaluation bar, player lines with accuracy, autoplay, flip, and keyboard navigation (arrows, Home, End, Space, F). During a game against the coach only the move list shows; the evaluation would give the game away. The Review tab lists games to load: the ones played against the coach (kept in the browser) and a chess.com player's recent games, fetched from chess.com's public archives.
+
 ## Puzzle rating
 
 Each puzzle is scored like a rated game against the puzzle's Lichess rating (Elo, K = 40): a clean solve is a win, a solve with wrong tries or hints a draw, giving up a loss. The rating is kept in the browser, picks the level of the next puzzle, and is reported to the coach along with the streak.
@@ -159,6 +163,7 @@ server/limits.js       per-client rate limits
 render.yaml            one-click Render deploy
 server/audit.js        audit log: Postgres or in-memory store, redaction, batching
 public/app.js          puzzle and review flow, tool handlers, interaction protocol, the call
+public/gameview.js     move list, evaluation timeline, evaluation bar, player lines (ported from a-review)
 public/board.js        board renderer: sliding pieces, drag and click moves, arrows, badges
 public/sounds.js       synthesized move sounds (WebAudio, no audio files)
 public/admin.*         the admin dashboard

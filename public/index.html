@@ -54,6 +54,25 @@
         <button id="stop" class="danger">End session</button>
       </div>
 
+      <!-- The game on the board: moves, evaluation timeline, navigation. -->
+      <section id="gamePanel" class="game-panel" hidden>
+        <div id="moveList" class="move-list" aria-label="Moves"></div>
+        <div id="reviewTools">
+          <div class="graph-wrap">
+            <svg id="graph" class="graph" viewBox="0 0 600 84" preserveAspectRatio="none" role="img" aria-label="Evaluation through the game"></svg>
+            <div id="graphTip" class="graph-tip" hidden></div>
+          </div>
+          <div class="nav">
+            <button id="navStart" class="quiet small" aria-label="Start of game" title="First move (Home)">⏮</button>
+            <button id="navPrev" class="quiet small" aria-label="Previous move" title="Previous move (←)">◀</button>
+            <button id="navPlay" class="quiet small" aria-label="Play through the game" aria-pressed="false" title="Autoplay (Space)">▶︎ Play</button>
+            <button id="navNext" class="quiet small" aria-label="Next move" title="Next move (→)">▶</button>
+            <button id="navEnd" class="quiet small" aria-label="End of game" title="Last move (End)">⏭</button>
+            <button id="navFlip" class="quiet small" title="Flip board (F)">Flip</button>
+          </div>
+        </div>
+      </section>
+
       <section id="notebook" class="notebook" hidden>
         <header>
           <h2>Notebook</h2>
@@ -108,9 +127,14 @@
         </div>
       </form>
 
-      <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to.">
-        <div class="promo" role="group" aria-label="Choose a piece to promote to"><div></div></div>
+      <div id="topPlayer" class="player-line" hidden></div>
+      <div class="board-wrap">
+        <div id="evalbar" class="evalbar" hidden aria-hidden="true"><div class="white" style="height:50%"></div><div class="label"></div></div>
+        <div id="board" class="board" aria-label="Chess board. Select a piece, then the square to move it to.">
+          <div class="promo" role="group" aria-label="Choose a piece to promote to"><div></div></div>
+        </div>
       </div>
+      <div id="bottomPlayer" class="player-line" hidden></div>
 
       <div class="controls puzzle-only">
         <button id="retry" class="quiet">Reset</button>
@@ -126,20 +150,12 @@
             <button id="reviewGame" class="quiet" hidden>Review this game</button>
             <button id="newGame" class="quiet" hidden>New game</button>
           </div>
-          <div id="playMoves" class="game-moves"></div>
         </div>
       </div>
 
       <div class="review-only review">
         <div id="reviewResult" hidden>
-          <div class="nav">
-            <button id="navStart" class="quiet small" aria-label="Start of game">⏮</button>
-            <button id="navPrev" class="quiet small" aria-label="Previous move">◀</button>
-            <button id="navNext" class="quiet small" aria-label="Next move">▶</button>
-            <button id="navEnd" class="quiet small" aria-label="End of game">⏭</button>
-            <span id="moments" class="moments"></span>
-          </div>
-          <div id="gameMoves" class="game-moves"></div>
+          <div id="moments" class="moments"></div>
         </div>
         <details id="reviewInput" open>
           <summary>Load a game</summary>
@@ -151,6 +167,14 @@
             <button id="reviewGo" class="primary">Analyze</button>
             <button class="quiet small" data-sample="legal-trap" data-side="b">Sample: Légal's trap</button>
             <button class="quiet small" data-sample="opera-game" data-side="b">Sample: Opera Game</button>
+          </div>
+          <div class="history">
+            <div id="historyList" class="recent"></div>
+            <form id="chesscomForm" class="controls">
+              <input id="chesscomUser" maxlength="40" autocomplete="off" placeholder="chess.com username" aria-label="chess.com username" />
+              <button class="quiet small">Load recent games</button>
+              <span id="chesscomError" class="error" role="alert"></span>
+            </form>
           </div>
         </details>
       </div>

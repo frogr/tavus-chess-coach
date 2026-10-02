@@ -7,6 +7,7 @@
 import { Chess } from '/vendor/chess.js';
 import { Board } from '/board.js';
 import * as sounds from '/sounds.js';
+import { MoveList, EvalGraph, renderEvalBar, renderPlayerLine, winPct, accuracy } from '/gameview.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM = new URLSearchParams(location.search).has('sim');
@@ -236,6 +237,8 @@ const board = new Board($('board'), {
   onMove: (from, to, promotion) => ({ review: reviewTry, play: gameMove, puzzle: playerMove })[state.mode](from, to, promotion || 'q'),
 });
 let shownArrows = '';
+const moveList = new MoveList($('moveList'), (ply) => gotoPly(ply));
+const evalGraph = new EvalGraph($('graph'), $('graphTip'), (ply) => gotoPly(ply));
 
 // Push the app state onto the board. Pieces slide when the position changes by
 // a move, and snap when a different position is loaded.
@@ -465,6 +468,8 @@ function setMode(mode) {
   state.mode = mode;
   document.body.dataset.mode = mode;
   document.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === mode));
+  stopAutoplay();
+  syncPanel();
 }
 
 function moveLabel(m) {
@@ -524,17 +529,14 @@ async function loadReview(pgn, side, { announce = true } = {}) {
 
 function renderReviewPanel() {
   const r = state.review;
-  const list = $('gameMoves');
-  list.innerHTML = '';
-  const keyPlies = new Set(r.keyMoments.map((k) => k.ply));
-  r.moves.forEach((m) => {
-    const b = document.createElement('button');
-    b.className = `mv ${m.class || ''} ${keyPlies.has(m.ply) ? 'key' : ''}`;
-    b.textContent = m.color === 'w' ? `${m.moveNumber}. ${m.san}${m.symbol}` : `${m.san}${m.symbol}`;
-    b.dataset.ply = m.ply;
-    b.addEventListener('click', () => gotoPly(m.ply));
-    list.appendChild(b);
-  });
+  moveList.set(r.moves.map((m) => ({ san: m.san, cls: m.class })));
+  const startCp = r.moves[0] ? r.moves[0].evalBefore : 0;
+  evalGraph.set(
+    [winPct(startCp), ...r.moves.map((m) => winPct(m.evalAfter))],
+    r.moves.filter((m) => m.class).map((m) => ({ i: m.ply, cls: m.class })),
+    ['Start', ...r.moves.map((m) => `${moveLabel(m)}  ${evalText(m.evalAfter)}`)]
+  );
+  r.accuracy = { w: accuracy(r.moves, 'w'), b: accuracy(r.moves, 'b') };
   const chips = $('moments');
   chips.innerHTML = '';
   if (!r.keyMoments.length) chips.innerHTML = '<span class="muted small">No mistakes</span>';
@@ -553,9 +555,10 @@ function renderReviewPanel() {
   $('reviewResult').hidden = false;
 }
 
-function gotoPly(ply) {
+function gotoPly(ply, fromAutoplay = false) {
   const r = state.review;
   if (!r) return;
+  if (!fromAutoplay) stopAutoplay();
   ply = Math.max(0, Math.min(r.moves.length, ply));
   const step = ply - state.reviewPly;
   const wasBrowsing = !state.moment;
@@ -576,16 +579,73 @@ function gotoPly(ply) {
   state.lastMove = m ? { from: m.uci.slice(0, 2), to: m.uci.slice(2, 4) } : null;
   state.badge = m && m.class ? { square: m.uci.slice(2, 4), cls: m.class } : null;
   if (m) {
-    const cls = m.class ? ` · ${m.class}` : '';
-    setStatus(`${moveLabel(m)} · eval ${evalText(m.evalAfter)}${cls}`, m.class === 'blunder' || m.class === 'mistake' ? 'bad' : '');
+    setStatus(m.class ? `${moveLabel(m)} · ${m.class}` : '', m.class === 'blunder' || m.class === 'mistake' ? 'bad' : '');
     if (m.class && m.bestSan) {
       state.arrows = [[m.best.slice(0, 2), m.best.slice(2, 4)]];
     }
   } else {
     setStatus('');
   }
-  document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === ply));
-  document.querySelector('.mv.cur')?.scrollIntoView({ block: 'nearest' });
+  syncReviewView(ply, m ? m.evalAfter : r.moves[0] ? r.moves[0].evalBefore : 0);
+  render();
+}
+
+// The move list, graph cursor, evaluation bar and player lines for the review position.
+function syncReviewView(ply, cp) {
+  const r = state.review;
+  syncPanel();
+  moveList.highlight(ply);
+  evalGraph.cursor(ply);
+  renderEvalBar($('evalbar'), cp, evalText(cp).replace('checkmate', '#'), state.orientation === 'b');
+  const turn = state.chess.turn();
+  const over = state.chess.isGameOver();
+  const line = (color) => ({
+    name: color === 'w' ? r.headers.White : r.headers.Black,
+    color,
+    you: r.side === color,
+    accuracy: r.accuracy?.[color],
+    active: !over && turn === color,
+  });
+  const top = state.orientation === 'w' ? 'b' : 'w';
+  renderPlayerLine($('topPlayer'), line(top));
+  renderPlayerLine($('bottomPlayer'), line(top === 'w' ? 'b' : 'w'));
+}
+
+// Which of the game-screen parts are on show, by mode.
+function syncPanel() {
+  const review = state.mode === 'review' && Boolean(state.review);
+  const play = state.mode === 'play' && Boolean(state.game);
+  $('gamePanel').hidden = !review && !(play && state.game.sans.length);
+  $('reviewTools').hidden = !review;
+  $('evalbar').hidden = !review;
+  $('topPlayer').hidden = $('bottomPlayer').hidden = !review && !play;
+}
+
+function stopAutoplay() {
+  clearInterval(state.autoplay);
+  state.autoplay = null;
+  $('navPlay').setAttribute('aria-pressed', 'false');
+}
+
+function toggleAutoplay() {
+  if (state.autoplay) return stopAutoplay();
+  const r = state.review;
+  if (!r) return;
+  if (state.reviewPly >= r.moves.length) gotoPly(0);
+  $('navPlay').setAttribute('aria-pressed', 'true');
+  state.autoplay = setInterval(() => {
+    if (state.mode !== 'review' || state.reviewPly >= state.review.moves.length) return stopAutoplay();
+    gotoPly(state.reviewPly + 1, true);
+  }, 1100);
+}
+
+function flipBoard() {
+  state.orientation = state.orientation === 'w' ? 'b' : 'w';
+  if (state.mode === 'review' && state.review) {
+    const r = state.review;
+    const m = r.moves[state.reviewPly - 1];
+    syncReviewView(state.reviewPly, m ? m.evalAfter : r.moves[0] ? r.moves[0].evalBefore : 0);
+  }
   render();
 }
 
@@ -611,7 +671,8 @@ function gotoMoment(n) {
   state.arrows = [[m.uci.slice(0, 2), m.uci.slice(2, 4)]];
   state.lastMove = prev ? { from: prev.uci.slice(0, 2), to: prev.uci.slice(2, 4) } : null;
   setStatus(`You played ${m.san}`, '');
-  document.querySelectorAll('.mv').forEach((b) => b.classList.toggle('cur', Number(b.dataset.ply) === k.ply - 1));
+  stopAutoplay();
+  syncReviewView(k.ply - 1, m.evalBefore);
   render();
   return (
     `Board now shows key moment ${k.index}, the position BEFORE the student's move ${moveLabel(m)}. ` +
@@ -808,17 +869,16 @@ function renderGame() {
   $('takeBack').hidden = $('resign').hidden = !g || g.over;
   $('reviewGame').hidden = !g || !g.over || g.sans.length < 2;
   $('newGame').hidden = !g || !g.over;
-  const list = $('playMoves');
-  list.replaceChildren();
-  (g ? g.sans : []).forEach((san, i) => {
-    const el = document.createElement('span');
+  syncPanel();
+  if (g) {
     // Verdicts on the student's moves appear once the game is over.
-    const mark = g.over ? g.marks[i] : null;
-    el.className = `mv ${mark || ''}`;
-    el.textContent = `${i % 2 === 0 ? `${i / 2 + 1}. ` : ''}${san}${mark ? MARK[mark] : ''}`;
-    list.append(el);
-  });
-  list.scrollTop = list.scrollHeight;
+    moveList.set(g.sans.map((san, i) => ({ san, cls: g.over ? g.marks[i] : null })), false);
+    moveList.highlight(g.sans.length);
+    const turn = g.chess.turn();
+    const line = (color) => ({ name: color === g.color ? state.player || 'You' : coachName(), color, you: color === g.color && Boolean(state.player), active: !g.over && turn === color });
+    renderPlayerLine($('topPlayer'), line(g.color === 'w' ? 'b' : 'w'));
+    renderPlayerLine($('bottomPlayer'), line(g.color));
+  }
   render();
 }
 
@@ -978,6 +1038,7 @@ function finishGame(g, result, reason, lead = '[board]') {
   g.result = result;
   g.reason = reason;
   audit('play.end', { result, reason, rating: g.rating, moves: Math.ceil(g.sans.length / 2), mistakes: costliest(g) });
+  saveGame(g);
   if (state.game === g && state.mode === 'play') {
     state.busy = false;
     if (result === 'won') setTimeout(() => sounds.play('great'), 260);
@@ -1014,17 +1075,101 @@ async function takeBack() {
   return `[board] ${playerName()} took back ${san}. It is their move again. Position now: ${text}`;
 }
 
-// Loads the game just played into review mode. Returns the review context for the coach.
-async function reviewPlayedGame({ announce = true } = {}) {
-  const g = state.game;
-  if (!g || g.sans.length < 2) return 'There is no game to review yet.';
-  if (!g.over) finishGame(g, 'unfinished', 'Game stopped');
+function gamePgn(g) {
   const you = state.player || 'Student';
   g.chess.header('Event', `Game against ${coachName()} (${g.rating})`);
   g.chess.header('White', g.color === 'w' ? you : coachName());
   g.chess.header('Black', g.color === 'b' ? you : coachName());
   g.chess.header('Result', { won: g.color === 'w' ? '1-0' : '0-1', lost: g.color === 'w' ? '0-1' : '1-0', drew: '1/2-1/2', unfinished: '*' }[g.result]);
-  const review = await loadReview(g.chess.pgn(), g.color, { announce });
+  return g.chess.pgn();
+}
+
+// ---------------------------------------------------------------- game history
+// Games played against the coach are kept in this browser, newest first, and
+// listed in the Review tab beside recent games from chess.com.
+const GAMES_KEY = 'coach-rook-games';
+function savedGames() {
+  try { return JSON.parse(localStorage.getItem(GAMES_KEY) || '[]'); } catch { return []; }
+}
+function saveGame(g) {
+  if (g.saved || g.sans.length < 4) return;
+  g.saved = true;
+  const entry = { at: Date.now(), opponent: coachName(), rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), pgn: gamePgn(g) };
+  try { localStorage.setItem(GAMES_KEY, JSON.stringify([entry, ...savedGames()].slice(0, 30))); } catch {}
+  renderHistory();
+}
+
+const RESULT_WORD = { won: 'Won', lost: 'Lost', drew: 'Draw', unfinished: 'Unfinished', win: 'Won', loss: 'Lost', draw: 'Draw' };
+const RESULT_CLASS = { won: 'win', win: 'win', lost: 'loss', loss: 'loss' };
+function renderHistory() {
+  const rows = [
+    ...savedGames().map((g) => ({ ...g, title: `${g.opponent} (${g.rating})`, meta: `${g.moves} moves · ${new Date(g.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` })),
+    ...(state.chesscom || []).map((g) => ({
+      title: `${g.opponent} (${g.oppRating})`,
+      meta: `${g.timeClass} · ${new Date(g.end * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · chess.com`,
+      color: g.me === 'white' ? 'w' : 'b',
+      result: g.result,
+      pgn: g.pgn,
+    })),
+  ];
+  $('historyList').replaceChildren(
+    ...rows.map((g) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const pip = document.createElement('span');
+      pip.className = `pip ${RESULT_CLASS[g.result] || ''}`;
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = g.title;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = `${g.color === 'w' ? 'White' : 'Black'} · ${g.meta}`;
+      const res = document.createElement('span');
+      res.className = `res ${RESULT_CLASS[g.result] || ''}`;
+      res.textContent = RESULT_WORD[g.result] || '';
+      b.append(pip, who, meta, res);
+      b.addEventListener('click', () => {
+        $('side').value = g.color;
+        loadReview(g.pgn, g.color);
+      });
+      return b;
+    })
+  );
+}
+
+// A player's recent games from chess.com's public archives (the last two months).
+async function loadChesscom(user) {
+  const get = async (url) => {
+    const r = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (r.status === 404) throw new Error(`No chess.com player named "${user}".`);
+    if (!r.ok) throw new Error(`chess.com returned ${r.status}.`);
+    return r.json();
+  };
+  const archives = (await get(`https://api.chess.com/pub/player/${encodeURIComponent(user.toLowerCase())}/games/archives`)).archives.slice(-2).reverse();
+  const games = [];
+  for (const url of archives) {
+    if (!/^https:\/\/api\.chess\.com\/pub\/player\//.test(url)) continue;
+    games.push(...(await get(url)).games.reverse());
+    if (games.length >= 25) break;
+  }
+  return games
+    .filter((g) => g.pgn && g.rules === 'chess')
+    .slice(0, 25)
+    .map((g) => {
+      const me = g.white.username.toLowerCase() === user.toLowerCase() ? 'white' : 'black';
+      const mine = g[me];
+      const opp = me === 'white' ? g.black : g.white;
+      const draw = ['agreed', 'repetition', 'stalemate', 'insufficient', '50move', 'timevsinsufficient'].includes(mine.result);
+      return { pgn: g.pgn, me, result: mine.result === 'win' ? 'win' : draw ? 'draw' : 'loss', opponent: opp.username, oppRating: opp.rating, timeClass: g.time_class, end: g.end_time };
+    });
+}
+
+// Loads the game just played into review mode. Returns the review context for the coach.
+async function reviewPlayedGame({ announce = true } = {}) {
+  const g = state.game;
+  if (!g || g.sans.length < 2) return 'There is no game to review yet.';
+  if (!g.over) finishGame(g, 'unfinished', 'Game stopped');
+  const review = await loadReview(gamePgn(g), g.color, { announce });
   if (!review) return 'The game could not be analyzed.';
   return `${review.context} This is the game they just played against you. Give your overall impression in a sentence and offer to start with the first key moment.`;
 }
@@ -1575,10 +1720,37 @@ async function boot() {
   $('navPrev').addEventListener('click', () => gotoPly(state.reviewPly - 1));
   $('navNext').addEventListener('click', () => gotoPly(state.reviewPly + 1));
   $('navEnd').addEventListener('click', () => gotoPly(1e9));
+  $('navPlay').addEventListener('click', toggleAutoplay);
+  $('navFlip').addEventListener('click', flipBoard);
   document.addEventListener('keydown', (e) => {
-    if (state.mode !== 'review' || !state.review || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-    if (e.key === 'ArrowLeft') gotoPly(state.reviewPly - 1);
-    if (e.key === 'ArrowRight') gotoPly(state.reviewPly + 1);
+    if (state.mode !== 'review' || !state.review || ['TEXTAREA', 'INPUT', 'SELECT', 'BUTTON'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+    const keys = {
+      ArrowLeft: () => gotoPly(state.reviewPly - 1),
+      ArrowRight: () => gotoPly(state.reviewPly + 1),
+      Home: () => gotoPly(0),
+      End: () => gotoPly(1e9),
+      ' ': toggleAutoplay,
+      f: flipBoard,
+    };
+    if (!keys[e.key]) return;
+    e.preventDefault();
+    keys[e.key]();
+  });
+  renderHistory();
+  try { $('chesscomUser').value = localStorage.getItem('coach-rook-chesscom') || ''; } catch {}
+  $('chesscomForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const user = $('chesscomUser').value.trim();
+    $('chesscomError').textContent = '';
+    if (!/^[\w-]{2,40}$/.test(user)) return ($('chesscomError').textContent = 'Enter a chess.com username.');
+    try {
+      state.chesscom = await loadChesscom(user);
+      try { localStorage.setItem('coach-rook-chesscom', user); } catch {}
+      if (!state.chesscom.length) $('chesscomError').textContent = 'No recent games.';
+      renderHistory();
+    } catch (err) {
+      $('chesscomError').textContent = err.message;
+    }
   });
 
   const cfg = await api('/api/config');

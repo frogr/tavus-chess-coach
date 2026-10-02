@@ -214,24 +214,82 @@ body:not([data-mode="play"]) .play-only { display: none; }
 .ticks { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .game-setup .controls { margin-top: 8px; }
 .game-setup .primary { margin-left: auto; }
-span.mv { cursor: default; }
 
 /* review */
 .review { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
 .review textarea { width: 100%; margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; resize: vertical; }
 .review summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.moments { display: flex; gap: 6px; flex-wrap: wrap; margin-left: 6px; }
+.moments { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { padding: 4px 10px; font-size: 12px; border-radius: 99px; font-family: 'JetBrains Mono', monospace; background: transparent; }
 .chip.blunder { border-color: var(--c-blunder); color: var(--c-blunder); }
 .chip.mistake { border-color: var(--c-mistake); color: var(--c-mistake); }
 .chip.inaccuracy { border-color: var(--c-inaccuracy); color: var(--c-inaccuracy); }
-.game-moves { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 10px; max-height: 120px; overflow: auto; font-family: 'JetBrains Mono', monospace; }
-.mv { padding: 3px 7px; font-size: 12px; border-color: transparent; background: transparent; color: var(--muted); }
-.mv.inaccuracy { color: var(--c-inaccuracy); }
-.mv.mistake { color: var(--c-mistake); }
-.mv.blunder { color: var(--c-blunder); }
-.mv.cur { background: var(--raised-2); color: var(--text); }
+/* game panel: move list, evaluation timeline, navigation (ported from a-review) */
+.game-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.move-list { max-height: 232px; overflow: auto; padding: 2px; scrollbar-width: thin; }
+.mv-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr); align-items: center; border-radius: 6px; }
+.mv-row:nth-child(even) { background: rgba(255, 255, 255, .025); }
+.mv-row .no { color: var(--dim); font-size: 13px; text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+.mv { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 7px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-weight: 600; font-size: 14px; color: var(--text); }
+.mv:hover:not(:disabled) { background: var(--raised); }
+.mv:disabled { opacity: 1; cursor: default; }
+.mv.cur { background: var(--raised-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.mini { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 8.5px; font-weight: 900; color: #fff; visibility: hidden; }
+.mini.inaccuracy, .mini.mistake, .mini.blunder { visibility: visible; box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
+.mini.inaccuracy { background: var(--c-inaccuracy); color: #2a2206; }
+.mini.mistake { background: var(--c-mistake); }
+.mini.blunder { background: var(--c-blunder); }
+.graph-wrap { position: relative; }
+.graph { width: 100%; height: 62px; display: block; cursor: pointer; border-radius: 7px; }
+.graph-tip { position: absolute; top: 4px; transform: translateX(-50%); pointer-events: none; z-index: 3; padding: 3px 8px; border-radius: 6px; font-size: 12px; white-space: pre; background: var(--raised-2); border: 1px solid var(--line-strong); box-shadow: 0 4px 12px rgba(0, 0, 0, .4); }
+.game-panel .nav { margin-top: 8px; }
+.game-panel .nav button { flex: 1; padding: 6px 4px; }
+.game-panel .nav button[aria-pressed="false"] { color: var(--muted); text-decoration: none; }
+.game-panel .nav button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* players and the evaluation bar around the board */
+/* The player lines take room above and below the board, so it is a little smaller in these modes. */
+body[data-mode="review"], body[data-mode="play"] { --board-size: max(280px, min(calc(100vh - 300px), calc(100vw - 32px), 640px)); }
+.player-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 6px; font-size: 13.5px; color: var(--muted); border-radius: 6px; }
+.player-line .name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.player-line .name b { color: var(--text); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-line .you { color: var(--accent); font-size: 12px; font-weight: 600; background: rgba(111, 208, 138, .12); border-radius: 99px; padding: 0 7px; }
+.avatar { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; flex: none; font-size: 11px; font-weight: 800; }
+.avatar.w { background: #f3f0e6; color: #1a1a1a; }
+.avatar.b { background: #2b2b2b; color: #f3f0e6; border: 1px solid var(--line-strong); }
+.player-line .right { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.player-line .acc { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; gap: 4px; }
+.player-line .acc small { color: var(--muted); font-weight: 500; }
+.player-line .turn .dot { display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+.player-line .turn.active .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(111, 208, 138, .25); }
+.player-line.active { background: linear-gradient(90deg, rgba(111, 208, 138, .14), transparent 55%); box-shadow: inset 3px 0 0 var(--accent); padding-left: 9px; }
+.board-wrap { position: relative; }
+.evalbar { position: absolute; left: -24px; top: 0; bottom: 0; width: 18px; border-radius: 5px; overflow: hidden; background: #2b2b2b; border: 1px solid var(--line-strong); }
+.evalbar .white { position: absolute; left: 0; right: 0; bottom: 0; background: #f3f0e6; transition: height .35s ease; }
+.evalbar.flipped .white { bottom: auto; top: 0; }
+.evalbar .label { position: absolute; left: 0; right: 0; text-align: center; font-size: 7.5px; font-weight: 800; padding: 3px 0; letter-spacing: -.03em; }
+.evalbar .label.on-white { color: #1a1a1a; }
+.evalbar .label.on-black { color: #f3f0e6; }
+@media (max-width: 1020px) { .evalbar { display: none; } }
+
+/* games to review */
+.history { margin-top: 12px; }
+.recent { display: grid; gap: 2px; max-height: 240px; overflow: auto; scrollbar-width: thin; }
+.recent:empty { display: none; }
+.recent button { display: grid; grid-template-columns: 8px minmax(0, auto) minmax(0, 1fr) auto; gap: 10px; align-items: baseline; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 7px 10px; }
+.recent button:hover { background: var(--raised); border-color: var(--line); }
+.recent .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); align-self: center; }
+.recent .pip.win { background: var(--good); }
+.recent .pip.loss { background: var(--bad); }
+.recent .who { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .res { font-weight: 700; font-size: 13px; color: var(--muted); }
+.recent .res.win { color: var(--good); }
+.recent .res.loss { color: var(--bad); }
+.history .controls input { flex: 1; min-width: 150px; padding: 6px 10px; font-size: 13px; }
+.history .error { flex-basis: 100%; min-height: 0; }
+.history .error:empty { display: none; }
 
 /* under the hood: a drawer, closed unless asked for */
 .hood { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100vw); z-index: 20; display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--surface); border-left: 1px solid var(--line-strong); box-shadow: -12px 0 40px rgba(0, 0, 0, .45); overflow: auto; }
