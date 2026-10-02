@@ -30,41 +30,18 @@
       <p class="modes">Puzzles · Practice games · Game review</p>
     </section>
 
-    <figure class="shot" aria-label="A practice game: the coach on video beside the board, with the student's attacked knight highlighted">
-      <div class="shot-coach">
-        <img src="/coach.jpg" width="876" height="584" alt="The coach on a video call" />
-        <p class="caption">Before I tell you — what's attacking your knight?</p>
-      </div>
-      <div>
-        <div class="eyebrow">vs Anna · 1500</div>
-        <div class="shot-title">Black to move</div>
-        <div id="heroBoard" class="board" inert><div class="promo"><div></div></div></div>
-      </div>
+    <figure class="film">
+      <video autoplay muted loop playsinline preload="metadata" poster="/hero.jpg" aria-label="A recorded session: the student tries a move, the coach explains what it allowed and asks a question, and the student finds the fork">
+        <source src="/hero.mp4" type="video/mp4" />
+      </video>
+      <figcaption>A real session, unedited. The student tries a rook move; the coach says what it allowed and asks about the knight.</figcaption>
     </figure>
 
     <!-- 2. The contrast -->
     <section id="how" class="contrast">
       <h2>Seeing the best move isn't the same as learning it.</h2>
-      <div class="loops">
-        <div class="loop passive">
-          <p class="loop-name">The usual review</p>
-          <ol>
-            <li><span class="mark">??</span> Blunder</li>
-            <li>Best move</li>
-            <li>Engine line</li>
-            <li>Close review</li>
-          </ol>
-        </div>
-        <div class="loop active">
-          <p class="loop-name">With Coach Rook</p>
-          <ol>
-            <li>Make a move</li>
-            <li>Get a question</li>
-            <li>Try again</li>
-            <li>Understand why</li>
-          </ol>
-        </div>
-      </div>
+      <p class="loop passive"><span class="mark">??</span> Blunder <i>→</i> best move <i>→</i> engine line <i>→</i> close the tab.</p>
+      <p class="loop active">Make a move <i>→</i> get a question <i>→</i> try again <i>→</i> understand why.</p>
     </section>
 
     <!-- 3. Three product stories -->
@@ -102,11 +79,6 @@
         </div>
       </div>
       <figure class="ui">
-        <div class="game-setup" inert>
-          <div class="strength">Coach strength <output>1500</output></div>
-          <input type="range" min="0" max="5" step="1" value="2" aria-hidden="true" tabindex="-1" />
-          <div class="ticks"><span>500</span><span>1000</span><span>1500</span><span>2000</span><span>2500</span><span>3000</span></div>
-        </div>
         <dl class="levels">
           <div><dt>500</dt><dd>Warns you about threats. Offers take-backs.</dd></div>
           <div><dt>1000</dt><dd>Explains each mistake. Offers a take-back.</dd></div>
@@ -140,20 +112,11 @@
     <section class="trust">
       <h2>The engine checks. Rook teaches.</h2>
       <p class="lead">The coach is never trusted to work out chess by itself. The board keeps the position. Stockfish judges the moves. The coach's job is to ask, explain and encourage.</p>
-      <div class="handoff" aria-label="What the coach is given before it speaks">
-        <div>
-          <span class="label">Board</span>
-          <code>Austin played Qd6. Queen from d1 to d6.</code>
-        </div>
-        <div>
-          <span class="label">Stockfish</span>
-          <code>Mistake. Bd3 kept it equal (−0.1). Now Black is winning (−3.4).</code>
-        </div>
-        <div class="says">
-          <span class="label">Coach</span>
-          <p>"Look at your bishop on e4. What happens to it now?"</p>
-        </div>
-      </div>
+      <dl class="exchange">
+        <dt>Board</dt><dd><code>Austin played Qd6. Queen from d1 to d6.</code></dd>
+        <dt>Stockfish</dt><dd><code>Mistake. Bd3 kept it equal (−0.1). Now Black is winning (−3.4).</code></dd>
+        <dt>Coach</dt><dd class="says">"Look at your bishop on e4. What happens to it now?"</dd>
+      </dl>
     </section>
 
     <!-- 5. Memory -->
@@ -177,7 +140,6 @@
 
     <!-- 6. Patience -->
     <section class="patience">
-      <p class="clock" aria-hidden="true">0:47</p>
       <h2>A coach that knows when to shut up.</h2>
       <p>Chess takes thinking time. Rook waits while you calculate instead of filling every silence.</p>
     </section>

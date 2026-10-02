@@ -521,6 +521,7 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.jpg': 'image/jpeg',
+  '.mp4': 'video/mp4',
   '.json': 'application/json; charset=utf-8',
   '.pgn': 'text/plain; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
@@ -551,6 +552,20 @@ function serveStatic(req, res, pathname) {
     if (req.headers['if-none-match'] === etag) {
       res.writeHead(304, headers);
       return res.end();
+    }
+    // Byte ranges, which Safari requires before it will play a video.
+    headers['Accept-Ranges'] = 'bytes';
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (range && (range[1] || range[2])) {
+      const start = range[1] ? Number(range[1]) : Math.max(0, stat.size - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1;
+      if (start > end || start >= stat.size) {
+        res.writeHead(416, { ...headers, 'Content-Range': `bytes */${stat.size}` });
+        return res.end();
+      }
+      res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': end - start + 1 });
+      if (req.method === 'HEAD') return res.end();
+      return fs.createReadStream(file, { start, end }).on('error', () => res.destroy()).pipe(res);
     }
     res.writeHead(200, { ...headers, 'Content-Length': stat.size });
     if (req.method === 'HEAD') return res.end();

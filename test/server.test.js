@@ -60,6 +60,19 @@ test('the about page and everything it loads are served', async () => {
   assert.match((await app.get('/coach.jpg')).headers.get('content-type'), /image\/jpeg/);
 });
 
+test('static files answer byte-range requests', async () => {
+  const whole = await app.get('/app.js');
+  const size = Number(whole.headers.get('content-length'));
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+  const part = await app.get('/app.js', { Range: 'bytes=0-9' });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get('content-range'), `bytes 0-9/${size}`);
+  assert.equal((await part.text()).length, 10);
+  const tail = await app.get('/app.js', { Range: 'bytes=-5' });
+  assert.equal(tail.headers.get('content-range'), `bytes ${size - 5}-${size - 1}/${size}`);
+  assert.equal((await app.get('/app.js', { Range: `bytes=${size}-` })).status, 416);
+});
+
 test('healthz answers immediately; config reports the coach as off without a key', async () => {
   assert.equal((await (await app.get('/healthz')).json()).ok, true);
   assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: false, coaches: [] });

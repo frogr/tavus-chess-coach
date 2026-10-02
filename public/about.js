@@ -11,13 +11,6 @@ function show(id, fen, { orientation = 'w', lastMove = null, highlights = [], ar
   board.refresh();
 }
 
-// A practice game after 1. e4 e5 2. Nf3 Nc6 3. Nc3 Nf6 4. Nxe5 Nxe5 5. d4: the student's knight is attacked.
-show('heroBoard', 'r1bqkb1r/pppp1ppp/5n2/4n3/3PP3/2N5/PPP2PPP/R1BQKB1R b KQkq - 0 5', {
-  orientation: 'b',
-  lastMove: { from: 'd2', to: 'd4' },
-  highlights: ['e5'],
-});
-
 // A puzzle from the pool, at the second hint: the key piece highlighted.
 show('puzzleBoard', 'r4rk1/b1pb1pp1/p2p3p/1p6/1n1PN2q/3QB3/PPB2PPP/2R2RK1 w - - 2 17', { highlights: ['e4'] });
 

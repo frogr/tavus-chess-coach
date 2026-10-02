@@ -7,7 +7,8 @@
 .about figure { margin: 0; }
 html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 
-.kicker { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+.kicker { font-size: 14px; font-weight: 600; color: var(--dim); margin-bottom: 12px; }
+.hero .kicker { color: var(--accent); }
 .cta { display: inline-block; padding: 12px 22px; border-radius: 8px; background: var(--accent); color: var(--accent-ink) !important; font-weight: 600; text-decoration: none; }
 .cta:hover { filter: brightness(1.06); }
 .cta:focus-visible, .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -22,36 +23,26 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .hero-actions { margin-top: 32px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .modes { margin-top: 22px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim); }
 
-/* the product, drawn with the app's own parts */
-.shot { padding: 28px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; align-items: stretch; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
-.shot-coach { position: relative; border-radius: var(--radius); overflow: hidden; background: #000; }
-.shot-coach img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 15%; }
-.shot-coach .caption { font-size: 16px; }
+/* the product: a recording of a real session */
+.film video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #0d1410; box-shadow: 0 0 0 1px var(--line-strong), 0 24px 60px rgba(0, 0, 0, .45); }
+.film figcaption { margin-top: 12px; font-size: 13.5px; color: var(--dim); }
 .shot-title { font-size: 20px; font-weight: 700; margin: 2px 0 10px; }
 .about .board { width: 100%; height: auto; aspect-ratio: 1; }
 
 /* 2. contrast */
 .contrast { padding: 140px 0 0; }
 .contrast h2 { max-width: 640px; }
-.loops { margin-top: 44px; display: grid; gap: 14px; }
-.loop { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: center; gap: 20px; padding: 22px 24px; border: 1px solid var(--line); border-radius: var(--radius); }
-.loop-name { font-size: 13px; color: var(--dim); }
-.loop ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
-.loop li { display: flex; align-items: center; white-space: nowrap; }
-.loop li + li::before { content: '→'; margin: 0 14px; color: var(--dim); }
-.loop.passive { color: var(--dim); }
-.loop.passive .mark { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 50%; background: var(--c-blunder); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0; }
-.loop.active { background: var(--surface); border-color: var(--line-strong); }
-.loop.active .loop-name { color: var(--accent); }
-.loop.active li { color: var(--text); }
-.loop.active li:last-child { color: var(--accent); }
+.loop { margin-top: 26px; font-size: clamp(17px, 2.1vw, 22px); line-height: 1.5; }
+.loop i { font-style: normal; color: var(--dim); margin: 0 .35em; }
+.loop.passive { color: var(--dim); margin-top: 36px; }
+.loop.passive .mark { display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; margin-right: .3em; border-radius: 50%; background: var(--c-blunder); color: #fff; font-size: .62em; font-weight: 800; vertical-align: .18em; }
+.loop.active { color: var(--text); font-weight: 600; }
 
 /* 3. stories (also used for memory) */
 .story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 72px; align-items: center; padding: 140px 0 0; }
 .story.flip .copy { order: 2; }
 .copy p { color: var(--muted); font-size: 16.5px; }
 .copy p + p { margin-top: 14px; }
-.copy .kicker { color: var(--accent); font-size: 12px; }
 .ladder { list-style: none; counter-reset: step; margin: 24px 0 0; padding: 0; }
 .ladder li { counter-increment: step; position: relative; padding: 11px 0 11px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; }
 .ladder li:last-child { border-bottom: 1px solid var(--line); }
@@ -61,8 +52,6 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .roster img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--bg); margin-right: -8px; }
 .roster span { margin-left: 22px; }
 
-.ui .game-setup { margin-bottom: 4px; }
-.ui .game-setup input { pointer-events: none; width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
 .levels { margin: 0; font-size: 14.5px; }
 .levels > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .levels dt { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); padding-top: 1px; }
@@ -76,23 +65,19 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 /* 4. trust */
 .trust { padding: 140px 0 0; }
 .trust .lead { margin-top: 0; }
-.handoff { margin-top: 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.handoff > div { padding: 20px 22px; border-right: 1px solid var(--line); }
-.handoff > div:last-child { border-right: 0; }
-.handoff .label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px; }
-.handoff code { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--muted); }
-.handoff .says { background: var(--surface); }
-.handoff .says .label { color: var(--accent); }
-.handoff .says p { font-size: 16px; line-height: 1.45; }
+.exchange { margin: 36px 0 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px 20px; max-width: 760px; }
+.exchange dt { font-size: 13.5px; color: var(--dim); padding-top: 2px; }
+.exchange dd { margin: 0; }
+.exchange code { font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; color: var(--muted); }
+.exchange .says { font-size: 19px; line-height: 1.4; color: var(--text); }
 
 /* 6. patience */
-.patience { padding: 160px 0 0; text-align: center; }
-.patience .clock { font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: .1em; color: var(--dim); margin-bottom: 18px; }
-.patience p:last-child { color: var(--muted); font-size: 16.5px; max-width: 460px; margin: 0 auto; }
+.patience { padding: 140px 0 0; max-width: 620px; }
+.patience p { color: var(--muted); font-size: 16.5px; }
 
 /* 7. final call */
-.closing { margin-top: 160px; padding: 80px 24px; text-align: center; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.closing h2 { margin-bottom: 28px; }
+.closing { margin-top: 140px; padding-top: 56px; border-top: 1px solid var(--line); }
+.closing h2 { font-size: clamp(30px, 4.6vw, 48px); margin-bottom: 28px; }
 .closing p { margin-top: 20px; color: var(--muted); font-size: 15px; }
 .foot { max-width: 1080px; margin: 96px auto 0; padding: 22px 24px 36px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; color: var(--dim); font-size: 13px; }
 .foot a { color: var(--muted); }
@@ -101,19 +86,12 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
   .about main { padding: 0 16px; }
   .hero { padding: 48px 0 32px; }
   .lead { font-size: 16.5px; }
-  .shot { grid-template-columns: minmax(0, 1fr); padding: 14px; gap: 16px; }
-  .shot-coach .caption { font-size: 14.5px; }
-  .shot-coach img { height: auto; }
   .contrast, .story, .trust { padding-top: 88px; }
   .story { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .story.flip .copy { order: 0; }
-  .loop { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px; }
-  .loop ol { font-size: 12px; }
-  .loop li + li::before { margin: 0 9px; }
-  .handoff { grid-template-columns: minmax(0, 1fr); }
-  .handoff > div { border-right: 0; border-bottom: 1px solid var(--line); }
-  .handoff > div:last-child { border-bottom: 0; }
-  .patience { padding-top: 104px; }
-  .closing { margin-top: 104px; padding: 56px 18px; }
+  .patience { padding-top: 88px; }
+  .closing { margin-top: 88px; padding-top: 40px; }
+  .exchange { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .exchange dd { margin-bottom: 12px; }
   .foot { margin-top: 64px; }
 }
