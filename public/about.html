@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coach Rook · A video chess coach</title>
+  <meta name="description" content="A live video chess coach that watches your board. Solve puzzles or review your own games with a coach who sees every move and checks its advice with Stockfish." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♜</text></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/about.css" />
+</head>
+<body class="about">
+  <header class="topbar">
+    <a class="brand" href="/about"><span class="logo">♜</span> Coach Rook</a>
+    <a class="cta small" href="/">Open the board</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>A chess coach that watches your board.</h1>
+      <p class="lead">Coach Rook joins you on a video call beside a real board. Solve puzzles or go through one of your own games. The coach sees every move you make, talks it through with you, and points at the squares it means.</p>
+      <div class="hero-actions">
+        <a class="cta" href="/">Open the board</a>
+        <span class="aside">The board is open to anyone. The video coach needs an access code.</span>
+      </div>
+    </section>
+
+    <figure class="shot" aria-label="A puzzle session: the coach on video next to the board with one knight highlighted, and the notebook of past sessions below the video">
+      <div class="shot-side">
+        <div class="shot-coach">
+          <img src="/coach.jpg" width="876" height="584" alt="Coach Rook on a video call" />
+          <p class="caption">Look at this knight. Where can it give check?</p>
+        </div>
+        <div class="notebook">
+          <header><h3>Notebook</h3><span class="muted">Sam</span></header>
+          <ul>
+            <li>Session note 2026-09-28: solved first try: back-rank mate, pin. fork: tried Qd5, Nc7 first, 1 hint, then solved it.</li>
+            <li>Session note 2026-09-24: reviewed their game; key mistakes were 10... cxb5? (mistake, engine wanted Qb4+); found the better move at 1 of 1 moments tried.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="shot-board">
+        <div class="eyebrow">Puzzle 3 · ●●○</div>
+        <div class="shot-title">White to move</div>
+        <div id="puzzleBoard" class="board" inert><div class="promo"><div></div></div></div>
+      </div>
+    </figure>
+
+    <section class="row">
+      <div class="copy">
+        <h2>Puzzles</h2>
+        <p>About 4,800 positions from the Lichess puzzle database, sorted into 20 tactical themes and three levels. Solve two cleanly and the next one is harder. Struggle and it eases off.</p>
+        <p>Say what you want out loud: an easier one, a harder one, or a theme by name. When you're stuck, hints come in steps. First a question, then a highlighted piece, then the name of the pattern. You get the answer only when you ask for it.</p>
+      </div>
+      <ul class="themes" aria-label="Puzzle themes">
+        <li>Smothered mate</li><li>Back-rank mate</li><li>Double check</li><li>Discovered check</li><li>Discovered attack</li>
+        <li>Skewer</li><li>Pin</li><li>Fork</li><li>Deflection</li><li>Attraction</li>
+        <li>Removing the defender</li><li>Trapped piece</li><li>In-between move</li><li>Clearance</li><li>Interference</li>
+        <li>X-ray</li><li>Promotion</li><li>Hanging piece</li><li>Mate in one</li><li>Mate in two</li>
+      </ul>
+    </section>
+
+    <section class="row flip">
+      <div class="copy">
+        <h2>Game review</h2>
+        <p>Paste a PGN or a Lichess link. Stockfish goes through every move and picks out the ones that cost you the most.</p>
+        <p>The coach takes you back to the position before each one, asks what you were thinking, and lets you try again on the board. Any move that holds the position counts, and the engine's first choice is only one of them. If you want it, the coach plays the better line out in front of you.</p>
+      </div>
+      <figure class="review-shot" aria-label="A reviewed game: a mistake marked on the board with an arrow showing the better move">
+        <div class="eyebrow">1-0 · Paris Opera</div>
+        <div class="shot-title">Morphy vs Duke Karl / Count Isouard</div>
+        <div id="reviewBoard" class="board" inert><div class="promo"><div></div></div></div>
+        <div class="review-meta">
+          <span class="chip inaccuracy">1. 6... Nf6?!</span>
+          <span class="chip mistake">2. 10... cxb5?</span>
+          <span class="eval">10... cxb5? · eval +8.1</span>
+        </div>
+      </figure>
+    </section>
+
+    <section class="facts">
+      <div>
+        <h3>Checked by the engine</h3>
+        <p>The coach doesn't calculate. Before it calls a move good or bad it asks Stockfish, and the board reports each move you play along with what that move allowed.</p>
+      </div>
+      <div>
+        <h3>Points at the board</h3>
+        <p>Highlights and arrows appear on your board while the coach talks, so "this knight" means a square you can see.</p>
+      </div>
+      <div>
+        <h3>Remembers you</h3>
+        <p>Give your name and it keeps a notebook: what you solved, what took a few tries, which mistakes came up in your games. The next session starts from there.</p>
+      </div>
+      <div>
+        <h3>Waits while you think</h3>
+        <p>Turn-taking is set for long silences. If you go quiet for a while you get a nudge, and the answer stays hidden.</p>
+      </div>
+    </section>
+
+    <section class="closing">
+      <a class="cta" href="/">Open the board</a>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Built on <a href="https://www.tavus.io">Tavus</a>, <a href="https://stockfishchess.org">Stockfish</a> and the <a href="https://database.lichess.org/#puzzles">Lichess puzzle database</a>.</span>
+    <a href="https://github.com/frogr/tavus-chess-coach">Source</a>
+  </footer>
+
+  <script type="module" src="/about.js"></script>
+</body>
+</html>

@@ -14,6 +14,7 @@
   <header class="topbar">
     <div class="brand"><span class="logo">♜</span> Coach Rook</div>
     <div class="topbar-actions">
+      <a class="quiet-link" href="/about">About</a>
       <button id="soundBtn" class="quiet" aria-pressed="true">Sound</button>
       <button id="hoodBtn" class="quiet" aria-expanded="false" aria-controls="hood" hidden>Log</button>
     </div>
@@ -25,7 +26,7 @@
       <div id="stage" class="stage" data-state="lobby">
         <form id="lobby" class="lobby">
           <input id="player" maxlength="40" autocomplete="given-name" placeholder="Your name" aria-label="Your name" />
-          <input id="code" maxlength="60" autocomplete="off" placeholder="Access code" aria-label="Access code" hidden />
+          <input id="code" type="password" maxlength="60" autocomplete="off" placeholder="Access code" aria-label="Access code" hidden />
           <button id="start" class="primary">Start session</button>
           <p id="lobbyError" class="error" role="alert"></p>
         </form>

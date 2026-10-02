@@ -140,6 +140,7 @@ public/app.js          puzzle and review flow, tool handlers, interaction protoc
 public/board.js        board renderer: sliding pieces, drag and click moves, arrows, badges
 public/sounds.js       synthesized move sounds (WebAudio, no audio files)
 public/admin.*         the admin dashboard
+public/about.*         the marketing page at /about (its boards are the app's board component)
 public/pieces/         piece images (cburnett set, see LICENSE.txt there)
 test/                  node:test suites; test/helpers.js has the fake Tavus API
 ```

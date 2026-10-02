@@ -484,6 +484,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
   '.json': 'application/json; charset=utf-8',
   '.pgn': 'text/plain; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
@@ -498,7 +499,7 @@ function serveStatic(req, res, pathname) {
     return send(res, 400, { error: 'bad request' });
   }
   if (rel.includes('\0')) return send(res, 400, { error: 'bad request' });
-  if (rel === '/admin') rel = '/admin.html';
+  if (rel === '/admin' || rel === '/about') rel += '.html';
   const file = VENDOR[rel] || path.join(PUBLIC, rel === '/' ? 'index.html' : rel);
   if (!VENDOR[rel] && !file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'forbidden' });
   fs.stat(file, (err, stat) => {

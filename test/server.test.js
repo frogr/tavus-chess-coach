@@ -50,6 +50,16 @@ test('every file the page loads is served from this server', async () => {
   assert.match((await app.get('/pieces/wK.svg')).headers.get('content-type'), /svg/);
 });
 
+test('the about page and everything it loads are served', async () => {
+  const res = await app.get('/about');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  const html = await res.text();
+  assert.doesNotMatch(html, /<script[^>]+src="https?:/, 'no third-party scripts');
+  for (const p of ['/about.js', '/about.css']) assert.equal((await app.get(p)).status, 200, p);
+  assert.match((await app.get('/coach.jpg')).headers.get('content-type'), /image\/jpeg/);
+});
+
 test('healthz answers immediately; config reports the coach as off without a key', async () => {
   assert.equal((await (await app.get('/healthz')).json()).ok, true);
   assert.deepEqual(await (await app.get('/api/config')).json(), { tavusReady: false, needsCode: false });

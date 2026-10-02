@@ -1,8 +1,6 @@
 .admin .brand { color: inherit; text-decoration: none; }
 .admin .topbar { gap: 28px; justify-content: flex-start; position: sticky; top: 0; z-index: 5; background: var(--bg); }
 .admin .topbar-actions { margin-left: auto; align-items: center; gap: 14px; }
-.quiet-link { color: var(--muted); font-size: 13px; text-decoration: none; }
-.quiet-link:hover { color: var(--text); }
 .admin-nav { display: flex; gap: 22px; align-self: stretch; margin: -12px 0; }
 .admin-nav a { display: flex; align-items: center; color: var(--muted); text-decoration: none; font-size: 14px; border-bottom: 2px solid transparent; }
 .admin-nav a:hover { color: var(--text); }
