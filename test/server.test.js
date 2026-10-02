@@ -185,3 +185,20 @@ test('engine endpoints are rate limited per client', async () => {
   // A different client is unaffected.
   assert.equal((await app.post('/api/analyze', { fen: BACK_RANK }, { 'X-Forwarded-For': '198.51.100.7' })).status, 200);
 });
+
+test('games are stored per browser key after every move and listed back; another key sees nothing', async () => {
+  const KEY = 'abcde-fghjk-mnpqr-stuvw';
+  const game = { id: '1790000000-abc123', opponent: 'Helen', rating: 1500, color: 'w', result: 'unfinished', moves: 2, pgn: '1. e4 e5 2. Nf3 Nc6 *' };
+  assert.deepEqual(await (await app.post('/api/game', { key: KEY, game })).json(), { ok: true });
+  // The same game, two moves later: the row is replaced, not duplicated.
+  await app.post('/api/game', { key: KEY, game: { ...game, moves: 4, result: 'lost', pgn: '1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. c3 Nf6 0-1' } });
+  const { games } = await (await app.post('/api/games', { key: KEY })).json();
+  assert.equal(games.length, 1);
+  assert.equal(games[0].id, game.id);
+  assert.equal(games[0].moves, 4);
+  assert.equal(games[0].result, 'lost');
+  assert.match(games[0].pgn, /Bc4/);
+  assert.deepEqual((await (await app.post('/api/games', { key: 'zzzzz-zzzzz-zzzzz-zzzzz' })).json()).games, []);
+  assert.equal((await app.post('/api/game', { key: KEY, game: { ...game, pgn: 'not a game' } })).status, 400);
+  assert.equal((await app.post('/api/game', { game })).status, 400);
+});

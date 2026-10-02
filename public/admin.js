@@ -90,8 +90,8 @@ const row = (route, ...cells) =>
 async function showOverview(which) {
   const { stats, memory, sessions, visits } = await get('/api/admin/overview');
   const drift = memory?.out_of_sync?.length || 0;
-  const memoryInfo = !memory || memory.error ? 'memory ledger unavailable' : `memory: ${memory.students} students, ${memory.sessions} sessions, ${drift ? `${drift} coach stores out of sync` : 'in sync'}`;
-  $('storeInfo').textContent = `${stats.events.toLocaleString()} events · ${stats.store} · ${stats.retention_days}-day retention · ${memoryInfo}`;
+  const memoryInfo = !memory || memory.error ? 'memory ledger unavailable' : `memory: ${memory.students} students, ${memory.sessions} sessions, ${memory.games ?? 0} games, ${drift ? `${drift} coach stores out of sync` : 'in sync'}`;
+  $('storeInfo').textContent = `${stats.events.toLocaleString()} events · ${stats.store} · ${stats.retention_days ? stats.retention_days + '-day retention' : 'kept forever'} · ${memoryInfo}`;
   if (which === 'visits') {
     view.replaceChildren(
       visits.length

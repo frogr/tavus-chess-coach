@@ -50,6 +50,13 @@ function participantTag(name, key) {
   return `chess-student-${slug}-${digest}`;
 }
 
+// Games are kept per browser key, whether or not a name was typed.
+function gameOwner(key) {
+  const k = cleanKey(key);
+  if (!k) throw httpError(400, 'Your notebook key is missing or not valid. Reload the page and try again.');
+  return `browser-${crypto.createHash('sha256').update(`games\n${k}`).digest('hex').slice(0, 24)}`;
+}
+
 // The session summary comes from the browser and is written into long-lived
 // memory that the PAL reads, so keep only what the board can actually produce:
 // known puzzle themes, moves in chess notation, short plain-text labels.
@@ -344,6 +351,7 @@ module.exports = {
   cleanName,
   cleanKey,
   participantTag,
+  gameOwner,
   getMemory,
   recordSession,
   studentContext,

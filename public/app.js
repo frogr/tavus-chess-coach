@@ -132,7 +132,14 @@ function newPosition() {
 async function api(path, body) {
   const headers = { 'X-Client-Id': CLIENT_ID };
   if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(path, body ? { method: 'POST', headers, body: JSON.stringify(body) } : { headers });
+  let res;
+  try {
+    res = await fetch(path, body ? { method: 'POST', headers, body: JSON.stringify(body) } : { headers });
+  } catch (e) {
+    // A request that never reached the server is in no server log, so it is recorded here.
+    audit('client.request_failed', { path, error: e.message });
+    throw e;
+  }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -145,6 +152,19 @@ async function api(path, body) {
 const CLIENT_ID = crypto.randomUUID(); // one per page load
 const auditQueue = [];
 let auditTimer = null;
+
+// Errors in the page, and every press of a button, link or form control.
+window.addEventListener('error', (e) => audit('client.error', { message: e.message, source: e.filename, line: e.lineno, stack: e.error?.stack }));
+window.addEventListener('unhandledrejection', (e) => audit('client.error', { message: String(e.reason?.message || e.reason), stack: e.reason?.stack }));
+document.addEventListener(
+  'click',
+  (e) => {
+    const el = e.target.closest?.('button, a, summary, select, [data-tab], [data-sim]');
+    if (!el) return;
+    audit('ui.click', { id: el.id || undefined, text: (el.textContent || '').trim().slice(0, 60), tab: el.dataset?.tab, cls: el.className || undefined });
+  },
+  true
+);
 
 const AUDIT_BATCH = 200; // events per report
 const AUDIT_BACKLOG = 5000; // kept while reports are failing; beyond this the oldest go
@@ -465,6 +485,7 @@ async function playSolution() {
 // ---------------------------------------------------------------- game review
 function setMode(mode) {
   if (state.mode === mode) return;
+  audit('ui.mode', { from: state.mode, to: mode });
   state.mode = mode;
   document.body.dataset.mode = mode;
   document.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === mode));
@@ -560,6 +581,7 @@ function gotoPly(ply, fromAutoplay = false) {
   if (!r) return;
   if (!fromAutoplay) stopAutoplay();
   ply = Math.max(0, Math.min(r.moves.length, ply));
+  if (!fromAutoplay) audit('review.goto', { ply, move: r.moves[ply - 1] ? moveLabel(r.moves[ply - 1]) : 'start' });
   const step = ply - state.reviewPly;
   const wasBrowsing = !state.moment;
   newPosition();
@@ -1108,6 +1130,38 @@ function saveGame(g) {
   const entry = { id: g.id, at: Date.now(), opponent: g.opponent || coachName(), rating: g.rating, color: g.color, result: g.result, moves: Math.ceil(g.sans.length / 2), pgn: gamePgn(g) };
   try { localStorage.setItem(GAMES_KEY, JSON.stringify([entry, ...savedGames().filter((x) => x.id !== g.id)].slice(0, 30))); } catch {}
   renderHistory();
+  storeGame(entry);
+}
+
+// The server keeps every game too, so one is never only in this browser.
+function storeGame(entry) {
+  api('/api/game', { key: notebookKey(), player: state.player || $('player').value.trim(), game: entry, conversation_id: state.conversationId || undefined }).catch((e) =>
+    audit('game.store_failed', { id: entry.id, error: e.message })
+  );
+}
+
+// On load: take the server's games into the list here, and send it any it lacks.
+async function syncGames() {
+  let local = savedGames();
+  let changed = false;
+  for (const g of local) if (!g.id) { g.id = `${g.at}-${Math.random().toString(36).slice(2, 8)}`; changed = true; }
+  try {
+    const { games } = await api('/api/games', { key: notebookKey(), player: $('player').value.trim() });
+    const known = new Map(games.map((g) => [g.id, g]));
+    for (const g of local) if (!known.has(g.id)) storeGame(g);
+    const mine = new Map(local.map((g) => [g.id, g]));
+    for (const g of games) {
+      const have = mine.get(g.id);
+      if (!have || (g.moves > have.moves) || (have.result === 'unfinished' && g.result !== 'unfinished')) { mine.set(g.id, g); changed = true; }
+    }
+    local = [...mine.values()].sort((a, b) => b.at - a.at).slice(0, 30);
+  } catch (e) {
+    audit('game.sync_failed', { error: e.message });
+  }
+  if (changed) {
+    try { localStorage.setItem(GAMES_KEY, JSON.stringify(local)); } catch {}
+    renderHistory();
+  }
 }
 
 const RESULT_WORD = { won: 'Won', lost: 'Lost', drew: 'Draw', unfinished: 'Unfinished', win: 'Won', loss: 'Lost', draw: 'Draw' };
@@ -1406,8 +1460,11 @@ function sendContext(context) {
 function onAppMessage(ev) {
   const msg = ev.data || ev;
   // Every interaction event goes to the audit log, including the ones the UI
-  // ignores. The once-a-second "still here" heartbeats are the one exception.
-  if (!/^system\.(replica|pal)_present$/.test(msg?.event_type || '')) audit('tavus.received', msg);
+  // ignores. Two exceptions carry nothing of their own: the once-a-second
+  // "still here" heartbeats, and the word-by-word partials of an utterance
+  // whose complete text arrives in the final event.
+  const partial = msg?.event_type === 'conversation.utterance.streaming' && msg.properties?.final === false;
+  if (!partial && !/^system\.(replica|pal)_present$/.test(msg?.event_type || '')) audit('tavus.received', msg);
   if (!msg || msg.message_type !== 'conversation') return;
   const p = msg.properties || {};
   // Tavus sends each coach utterance twice (role "replica" and role "pal"); show it once.
@@ -1878,6 +1935,7 @@ async function boot() {
     keys[e.key]();
   });
   renderHistory();
+  syncGames();
   try { $('chesscomUser').value = localStorage.getItem('coach-rook-chesscom') || ''; } catch {}
   $('chesscomForm').addEventListener('submit', async (e) => {
     e.preventDefault();

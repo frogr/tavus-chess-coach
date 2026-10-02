@@ -24,6 +24,15 @@ create table if not exists student_sync (
   detail text,
   primary key (tag, pal_id)
 );
+create table if not exists student_games (
+  owner text not null,
+  game_id text not null,
+  updated_at timestamptz not null default now(),
+  conversation_id text,
+  data jsonb not null,
+  primary key (owner, game_id)
+);
+create index if not exists student_games_owner on student_games (owner, updated_at desc);
 `;
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : String(d));
@@ -31,6 +40,7 @@ const iso = (d) => (d instanceof Date ? d.toISOString() : String(d));
 function memoryLedger() {
   const sessions = new Map(); // tag -> Map(conversation_id -> row)
   const syncs = new Map();
+  const games = new Map();
   return {
     name: 'memory (not persisted: set DATABASE_URL)',
     durable: false,
@@ -48,8 +58,15 @@ function memoryLedger() {
     async syncsFor(tag) {
       return [...syncs.entries()].filter(([k]) => k.startsWith(`${tag}\n`)).map(([, v]) => v);
     },
+    async saveGame(owner, id, conversationId, data) {
+      games.set(`${owner}\n${id}`, { owner, game_id: id, updated_at: new Date().toISOString(), conversation_id: conversationId || null, data });
+    },
+    async gamesFor(owners, limit = 30) {
+      return [...games.values()].filter((g) => owners.includes(g.owner)).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, limit);
+    },
     async stats() {
       return {
+        games: games.size,
         students: sessions.size,
         sessions: [...sessions.values()].reduce((n, m) => n + m.size, 0),
         out_of_sync: [...syncs.entries()].filter(([, v]) => !v.ok).map(([k, v]) => ({ tag: k.split('\n')[0], ...v })),
@@ -93,8 +110,20 @@ function postgresLedger(url) {
       const { rows } = await pool.query('select pal_id, checked_at, ok, pinned, detail from student_sync where tag = $1', [tag]);
       return rows;
     },
+    // One row per game, replaced as the game grows: every game is kept, finished or not.
+    async saveGame(owner, id, conversationId, data) {
+      await pool.query(
+        `insert into student_games (owner, game_id, conversation_id, data) values ($1, $2, $3, $4::jsonb)
+         on conflict (owner, game_id) do update set updated_at = now(), conversation_id = coalesce(excluded.conversation_id, student_games.conversation_id), data = excluded.data`,
+        [owner, id, conversationId || null, JSON.stringify(data)]
+      );
+    },
+    async gamesFor(owners, limit = 30) {
+      const { rows } = await pool.query('select owner, game_id, updated_at, conversation_id, data from student_games where owner = any($1) order by updated_at desc limit $2', [owners, limit]);
+      return rows.map((r) => ({ ...r, updated_at: iso(r.updated_at) }));
+    },
     async stats() {
-      const totals = await pool.query('select count(distinct tag)::int as students, count(*)::int as sessions from student_sessions');
+      const totals = await pool.query('select count(distinct tag)::int as students, count(*)::int as sessions, (select count(*)::int from student_games) as games from student_sessions');
       const bad = await pool.query('select tag, pal_id, checked_at, pinned, detail from student_sync where not ok order by checked_at desc limit 50');
       return { ...totals.rows[0], out_of_sync: bad.rows };
     },
@@ -129,6 +158,8 @@ module.exports = {
   sessionsFor: call('sessionsFor'),
   saveSync: call('saveSync'),
   syncsFor: call('syncsFor'),
+  saveGame: call('saveGame'),
+  gamesFor: call('gamesFor'),
   stats: async () => ({ store: store.name, ...(await call('stats')()) }),
   durable: () => store.durable,
   storeName: () => store.name,

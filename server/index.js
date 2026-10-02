@@ -13,7 +13,7 @@ const { nextPuzzle } = require('./puzzles');
 const { reviewGame, reviewContext, judgeMove } = require('./review');
 const { playTurn, levelFor } = require('./play');
 const { COACHES, coachFor } = require('./coaches');
-const { cleanName, participantTag, getMemory, recordSession, studentContext } = require('./memory');
+const { cleanName, participantTag, gameOwner, getMemory, recordSession, studentContext } = require('./memory');
 const { httpError } = require('./errors');
 const { createLimiter } = require('./limits');
 const ledger = require('./ledger');
@@ -348,6 +348,9 @@ const routes = {
     const memory = tag ? await studentContext(palId, name, key) : { notes: [], profile: null, sync: null };
     const recent = memory.notes;
     const returning = recent.length > 0;
+    // Everything the coach's memory store holds as this call begins, pinned and
+    // learned, goes into the audit record: what the coach knew is never a guess.
+    const memoryBefore = tag ? await getMemory(palId, name, key).catch((e) => ({ error: e.message })) : null;
 
     // The opener fits what the student has on screen: a puzzle, a game against the coach, or a review.
     const opener = Object.hasOwn(OPENERS, mode) ? OPENERS[mode] : OPENERS.puzzle;
@@ -382,7 +385,7 @@ const routes = {
       },
     });
     await audit.session(convo.conversation_id, {
-      data: { player: name, coach: coach.key, participant_tag: tag, pal_id: palId, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent, profile_sent: memory.profile, memory_sync: memory.sync && { ok: memory.sync.ok, pinned: memory.sync.pinned, detail: memory.sync.detail } },
+      data: { player: name, coach: coach.key, participant_tag: tag, pal_id: palId, returning, client_id: clientId, ip, context, greeting: greeting || (returning ? '(generated from context)' : '(PAL default)'), notes_sent: recent, profile_sent: memory.profile, memory_before: memoryBefore, memory_sync: memory.sync && { ok: memory.sync.ok, pinned: memory.sync.pinned, detail: memory.sync.detail } },
     });
     return { conversation_id: convo.conversation_id, conversation_url: convo.conversation_url, returning, max_seconds: MAX_CALL_SECONDS, coach: coach.key };
   },
@@ -404,9 +407,15 @@ const routes = {
       result = await recordSession(palIds, name, key, conversation_id, summary);
     }
     if (valid) {
+      // And what each coach's store holds once the call is over.
+      let memoryAfter = null;
+      if (name && key) {
+        memoryAfter = {};
+        for (const [coachKey, palId] of Object.entries(cfg.pals)) memoryAfter[coachKey] = await getMemory(palId, name, key).catch((e) => ({ error: e.message }));
+      }
       await audit.session(conversation_id, {
         ended_at: new Date().toISOString(),
-        data: { summary: summary || null, note: result.note || null, note_saved: result.saved, note_pinned: result.pinned ?? null, memory_sync: result.sync || null },
+        data: { memory_after: memoryAfter, summary: summary || null, note: result.note || null, note_saved: result.saved, note_pinned: result.pinned ?? null, memory_sync: result.sync || null },
       });
       // Tavus's own record of the call; the transcript arrives later by webhook.
       pullTavusRecord(conversation_id).catch(() => {});
@@ -423,6 +432,43 @@ const routes = {
     if (typeof conversation_id !== 'string' || !/^[a-z0-9]{4,64}$/i.test(conversation_id)) throw httpError(400, 'That is not a conversation.');
     const { saved } = await recordSession([], cleanName(player), key, conversation_id, summary);
     return { ok: true, saved };
+  },
+
+  // Every game against a coach is stored here after every move, under the
+  // browser's notebook key: finished or not, in a call or not.
+  'POST /api/game': async ({ key, player, game, conversation_id }, { ip }) => {
+    budget(limits.events, ip, 'event reports');
+    const owner = gameOwner(key);
+    const g = game && typeof game === 'object' ? game : {};
+    if (typeof g.id !== 'string' || !/^[\w-]{6,48}$/.test(g.id)) throw httpError(400, 'That is not a game.');
+    if (typeof g.pgn !== 'string' || !g.pgn.trim() || g.pgn.length > 20000) throw httpError(400, 'That is not a game.');
+    try {
+      new Chess().loadPgn(g.pgn);
+    } catch {
+      throw httpError(400, 'That is not a game.');
+    }
+    levelFor(g.rating);
+    const data = {
+      opponent: cleanName(g.opponent) || 'Coach',
+      rating: g.rating,
+      color: g.color === 'b' ? 'b' : 'w',
+      result: ['won', 'lost', 'drew'].includes(g.result) ? g.result : 'unfinished',
+      moves: Math.max(0, Math.min(300, Math.floor(Number(g.moves) || 0))),
+      pgn: g.pgn,
+      at: Date.now(),
+      player: cleanName(player) || null,
+    };
+    await ledger.saveGame(owner, g.id, typeof conversation_id === 'string' && /^[a-z0-9]{4,64}$/i.test(conversation_id) ? conversation_id : null, data);
+    return { ok: true };
+  },
+
+  // The games stored for this browser key, and for this student if a name is given.
+  'POST /api/games': async ({ key, player }) => {
+    const owners = [gameOwner(key)];
+    const tag = participantTag(cleanName(player) || null, key);
+    if (tag) owners.push(tag);
+    const games = await ledger.gamesFor(owners);
+    return { games: games.map((g) => ({ id: g.game_id, ...g.data, at: g.data.at || Date.parse(g.updated_at) })) };
   },
 
   // What Coach Rook remembers about a student (pinned notes + Tavus learned memory).

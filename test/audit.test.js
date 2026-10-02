@@ -118,6 +118,10 @@ test('audit log end to end', async (t) => {
     assert.equal(session.data.note_saved, true);
     assert.match(session.data.note, /solved first try: back-rank mate/);
     assert.equal(session.data.summary.puzzles[0].theme, 'back-rank mate');
+    // What the coach's memory held when the call began, and what every coach's holds now.
+    assert.deepEqual(session.data.memory_before, { pinned: [], learned: null, sessions: 0 });
+    assert.deepEqual(Object.keys(session.data.memory_after).sort(), ['anna', 'darius', 'helen', 'victor']);
+    assert.match(session.data.memory_after.anna.pinned[0].text, /solved first try: back-rank mate/);
   });
 
   await t.test('visits group everything one page load did', async () => {

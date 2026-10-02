@@ -6,13 +6,15 @@
 // deploys. Without it they are kept in memory only (local development, tests).
 //
 // Recording never blocks or fails a request: events are queued and written in
-// batches, and a write error is logged and dropped.
+// batches. A batch that fails to write is kept and retried.
 const crypto = require('crypto');
 
-const MAX_DATA_BYTES = 32000; // per event; larger payloads are truncated
+const MAX_DATA_BYTES = 256000; // per event; larger payloads are truncated (a full game review is about 60 KB)
 const MAX_RECORD_BYTES = 2000000; // transcripts and Tavus's own conversation records are kept whole
 const FLUSH_MS = 1000;
-const RETENTION_DAYS = Number(process.env.AUDIT_RETENTION_DAYS || 90);
+const MAX_BACKLOG = 50000; // events held while the database is unreachable
+// 0 keeps everything. Set a number of days to prune older events on boot.
+const RETENTION_DAYS = Number(process.env.AUDIT_RETENTION_DAYS || 0);
 
 const SCHEMA = `
 create table if not exists audit_events (
@@ -237,7 +239,7 @@ let timer = null;
 function init() {
   ready ||= store
     .init()
-    .then(() => store.prune(RETENTION_DAYS))
+    .then(() => (RETENTION_DAYS > 0 ? store.prune(RETENTION_DAYS) : null))
     .then(() => console.log(`  Audit log: ${store.name}`))
     .catch((e) => {
       // A database that can't be reached must not take the app down with it.
@@ -257,7 +259,18 @@ async function flush() {
     await init();
     await store.addEvents(batch);
   } catch (e) {
-    console.error(`audit write failed, ${batch.length} events dropped: ${e.message}`);
+    // Keep the batch and try again with the next flush. Only when the backlog
+    // passes MAX_BACKLOG are the oldest events given up, and that is logged.
+    queue = batch.concat(queue);
+    if (queue.length > MAX_BACKLOG) {
+      console.error(`audit backlog full: ${queue.length - MAX_BACKLOG} oldest events dropped`);
+      queue = queue.slice(queue.length - MAX_BACKLOG);
+    }
+    console.error(`audit write failed, ${batch.length} events kept for retry: ${e.message}`);
+    if (!timer) {
+      timer = setTimeout(flush, 5000);
+      timer.unref();
+    }
   }
 }
 

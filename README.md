@@ -62,7 +62,7 @@ Set these in `.env` locally or in the host's environment.
 | `DATABASE_URL` | none | Postgres connection string for the audit log and the student ledger. Without it both are held in memory and lost on restart, which for the ledger means memory cannot be rebuilt. Set it in production. |
 | `ADMIN_TOKEN` | none | Turns on `/admin`. Use a long random value. |
 | `MAX_CALL_SECONDS` | `3600` | Longest a video session may run. 3600 is Tavus's ceiling. |
-| `AUDIT_RETENTION_DAYS` | `90` | How long audit events are kept. |
+| `AUDIT_RETENTION_DAYS` | `0` | Days of audit events to keep. `0` keeps everything. |
 | `PORT` | `3000` | Port to listen on. |
 | `PUBLIC_URL` | `RENDER_EXTERNAL_URL` | The server's public address, so Tavus can send callbacks (transcript, shutdown reason). |
 | `TAVUS_PAL_ID` | none | Use an existing PAL for the first coach instead of finding or creating one. |
@@ -150,7 +150,7 @@ Traffic runs in two directions, both over the Tavus interaction protocol:
 | `chess_goto_move` | In review, puts the board on a given move | `silent` / `generate_response` | "Go to move 12" |
 | `chess_open` | Switches the screen back to the puzzle, the game or the review already open | `silent` / `generate_response` | Moving around without loading anything new |
 
-The coach drives the app: the prompt tells it to call a tool for any request to switch, never to send the student to a tab. When a call starts, and whenever the student switches tabs themselves, the board tells the coach what is on screen and which saved games exist. Games against a coach are saved in the browser after every move, so a game from an earlier call, finished or not, can be reviewed in the next one.
+The coach drives the app: the prompt tells it to call a tool for any request to switch, never to send the student to a tab. When a call starts, and whenever the student switches tabs themselves, the board tells the coach what is on screen and which saved games exist. Games against a coach are saved after every move, in the browser and on the server, so a game from an earlier call, finished or not, can be reviewed in the next one.
 
 The definitions and the system prompt are in `server/pal-config.js`.
 
@@ -210,7 +210,7 @@ A student is their name plus a random **notebook key** generated in their browse
 
 ## Audit log and admin dashboard
 
-To debug what the coach said, you need what it was told. Everything is recorded:
+Every input and output is recorded on the server; [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) lists each one and where to find it. To debug what the coach said, you need what it was told:
 
 - **Every API request** to this server: method, path, status, timing, request and response.
 - **Every call to Tavus**, with request and response, and **every Tavus callback** (transcript, perception analysis, shutdown reason). After a call ends the server also pulls Tavus's own record of the conversation.
@@ -237,6 +237,8 @@ All bodies are JSON. Errors are `{ "error": "…" }` with a 4xx status for bad i
 | `POST /api/session` | Starts a video session. Needs the access code. |
 | `POST /api/session/checkpoint` | Stores the session so far in the ledger. Needs the access code. |
 | `POST /api/session/end` | Ends it, stores the session and syncs every coach's memory. Needs the access code. |
+| `POST /api/game` | Stores a game against a coach (called after every move). |
+| `POST /api/games` | The games stored for this browser key. |
 | `POST /api/memory` | A student's notebook. Needs the access code. |
 | `POST /api/events` | Browser event reports for the audit log. |
 | `POST /api/tavus/webhook/<token>` | Tavus callbacks. |
@@ -267,7 +269,7 @@ There are no browser tests. The UI is checked by hand and with the `?sim=1` simu
 
 - **Strength ratings are labels.** They name engine settings and have not been measured against rated players.
 - **A coach move takes a few seconds** on Render's free tier, and the instance sleeps when idle.
-- **Puzzle rating, streak, seen puzzles and games against the coach live in the browser.** They do not follow a student across devices. Session notes do, with the notebook key.
+- **Puzzle rating, streak and seen puzzles live in the browser.** They do not follow a student across devices. Session notes and games against a coach do, with the notebook key.
 - **A notebook key is not an account.** Anyone with the name and key can read and add to that notebook. Lose the key and the notebook starts empty (the history stays in the ledger; see docs/MEMORY.md, Repairs).
 - **Tavus's learned memory is not verified.** Only the board-written notes are. See docs/MEMORY.md, What is not guaranteed.
 - **One access code for everyone.** There are no per-user credentials or quotas.
@@ -308,6 +310,7 @@ scripts/import-puzzles.js   rebuilds the pool from the Lichess database
 scripts/verify-puzzles.js   re-checks a random sample of the pool
 scripts/backfill-ledger.js  copies pre-ledger sessions from the audit log into the ledger
 docs/MEMORY.md           how memory works, what is guaranteed, how to check it
+docs/OBSERVABILITY.md    every input and output, where it is recorded, how to look it up
 public/index.html, styles.css, app.js   the app: modes, tool handlers, interaction protocol, the call
 public/board.js          board renderer: sliding pieces, drag and click moves, arrows, badges
 public/gameview.js       move list, evaluation timeline, evaluation bar, player lines

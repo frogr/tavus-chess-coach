@@ -106,7 +106,7 @@ All in `test/memory-sync.test.js` and `test/tavus-flow.test.js`, run against a f
 
 Stated plainly, because these are the ways memory can still be wrong.
 
-- **Learned memory is Tavus's.** Tavus builds it from the conversation, which includes anything the speech recognizer misheard and anything the model got wrong. This app cannot inspect how it is built, correct it, or verify it. The system prompt tells the coach that when a learned memory disagrees with a session note or the profile, the note is right. That is an instruction to a language model, not a mechanism.
+- **Learned memory is Tavus's.** Tavus builds it from the conversation, which includes anything the speech recognizer misheard and anything the model got wrong. This app cannot see how it is built or correct it. It does record it: the learned memory in the coach's store is saved to the audit log at the start and end of every call (`memory_before`, `memory_after`), so what the coach had been told is always on file. The system prompt tells the coach that when a learned memory disagrees with a session note or the profile, the note is right. That is an instruction to a language model, not a mechanism.
 - **The coach can still misuse a correct note.** The notes are exact; how the model paraphrases them aloud is not. It can blur "2 of 9" into "you usually miss these". What it was given is recorded per session (see [Checking](#checking-that-it-is-working)), so a wrong statement can be traced to either a wrong note (our bug) or a wrong reading (the model).
 - **Nothing said out loud is in the ledger.** Goals, preferences and anything else the student only said live in learned memory alone.
 - **Identity is a name plus a key in the browser.** Clear the browser's storage, switch device without copying the key, or type the name differently ("Sam" then "Sam S") and a new, empty notebook starts. The old one still exists in the ledger and can be joined back by hand (see [Repairs](#repairs)).
@@ -163,7 +163,7 @@ update student_sessions set tag = '<new tag>' where tag = '<old tag>';
 ```
 
   The next sync pins the rebuilt profile and notes under the new key.
-- **Sessions from before the ledger existed.** `node scripts/backfill-ledger.js` copies them from the audit log into the ledger of whichever database `DATABASE_URL` points at. It has been run against the development database only (2026-10-02); to backfill production, run it with production's `DATABASE_URL`. The audit log keeps session records but prunes events after 90 days.
+- **Sessions from before the ledger existed.** `node scripts/backfill-ledger.js` copies them from the audit log into the ledger of whichever database `DATABASE_URL` points at. It has been run against the development database only (2026-10-02); to backfill production, run it with production's `DATABASE_URL`. The audit log keeps session records and, by default, every event.
 
 ## Tavus limits this relies on
 
